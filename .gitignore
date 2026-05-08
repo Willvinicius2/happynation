@@ -191,3 +191,7 @@ Thumbs.db
 *.backup
 *.bkp
 *.old
+
+# Claude Code local artifacts
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

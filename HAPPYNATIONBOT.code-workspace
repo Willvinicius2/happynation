@@ -1,0 +1,68 @@
+{
+  "folders": [
+    {
+      "name": "HAPPYNATIONBOT",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.watcherExclude": {
+      "**/.venv/**": true,
+      "**/.git/objects/**": true,
+      "**/.git/subtree-cache/**": true,
+      "**/node_modules/**": true,
+      "**/__pycache__/**": true,
+      "**/.pytest_cache/**": true,
+      "**/.ruff_cache/**": true,
+      "**/.mypy_cache/**": true,
+      "**/logs/**": true,
+      "**/src/logs/**": true,
+      "**/*.log": true,
+      "**/dist/**": true,
+      "**/build/**": true
+    },
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/.pytest_cache": true,
+      "**/.ruff_cache": true,
+      "**/.mypy_cache": true
+    },
+    "search.exclude": {
+      "**/.venv": true,
+      "**/logs": true,
+      "**/src/logs": true,
+      "**/__pycache__": true,
+      "**/.pytest_cache": true,
+      "**/.ruff_cache": true,
+      "**/dist": true,
+      "**/build": true,
+      "**/src/strategies/extras": true,
+      "**/LICENSE": true
+    },
+    "python.analysis.exclude": [
+      "**/.venv/**",
+      "**/logs/**",
+      "**/src/logs/**",
+      "**/__pycache__/**",
+      "**/.pytest_cache/**",
+      "**/.ruff_cache/**",
+      "**/dist/**",
+      "**/build/**",
+      "**/src/strategies/extras/**"
+    ],
+    "python.analysis.indexing": true,
+    "python.analysis.userFileIndexingLimit": 2000,
+    "python.analysis.diagnosticMode": "openFilesOnly",
+    "python.analysis.memory.keepLibraryAst": false,
+    "python.analysis.memory.keepLibraryLocalVariables": false,
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "files.useExperimentalFileWatcher": true,
+    "editor.formatOnSave": false
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-python.python",
+      "ms-python.vscode-pylance"
+    ]
+  }
+}

@@ -1,0 +1,96 @@
+# Sobe apenas o bot de trade (src.main) e o dashboard (src.dashboard)
+# em background, sem o stack do Aether.
+#
+# Uso:
+#   .\scripts\run_happynation_bg.ps1
+#   .\scripts\run_happynation_bg.ps1 -Restart   # mata processos antigos antes
+
+param(
+    [switch]$Restart
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+$python = Join-Path $root ".venv\Scripts\python.exe"
+$logsDir = Join-Path $root "logs"
+$pidFile = Join-Path $logsDir "happynation.pids"
+
+if (-not (Test-Path $python)) {
+    Write-Host "python.exe nao encontrado em $python" -ForegroundColor Red
+    exit 1
+}
+if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | Out-Null }
+
+$env:TRADE_DASHBOARD_ALLOW_PORT_FALLBACK = if ($env:TRADE_DASHBOARD_ALLOW_PORT_FALLBACK) { $env:TRADE_DASHBOARD_ALLOW_PORT_FALLBACK } else { "1" }
+
+$modules = @(
+    @{ name = "bot";       module = "src.main" },
+    @{ name = "dashboard"; module = "src.dashboard" }
+)
+
+function Get-ExistingModuleProcesses {
+    param([array]$Entries)
+    $pythonProcs = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue)
+    $found = @()
+    foreach ($entry in $Entries) {
+        $pattern = "-m\s+$([regex]::Escape($entry.module))(\s|$)"
+        foreach ($p in $pythonProcs) {
+            $cmd = $p.CommandLine
+            if ($cmd -and $cmd -match $pattern) {
+                $found += [pscustomobject]@{
+                    Pid = [int]$p.ProcessId
+                    Name = $entry.name
+                    Module = $entry.module
+                }
+            }
+        }
+    }
+    return $found | Sort-Object Pid -Unique
+}
+
+$existing = @(Get-ExistingModuleProcesses -Entries $modules)
+if ($existing.Count -gt 0) {
+    if (-not $Restart) {
+        Write-Host "Ja existe bot/dashboard rodando:" -ForegroundColor Yellow
+        $existing | Select-Object Pid,Name,Module | Format-Table -AutoSize
+        Write-Host "Use -Restart para reiniciar." -ForegroundColor DarkGray
+        exit 1
+    }
+    foreach ($p in $existing) {
+        try {
+            Stop-Process -Id $p.Pid -Force -ErrorAction Stop
+            Write-Host ("[restart] stop pid={0} ({1})" -f $p.Pid, $p.Name) -ForegroundColor Yellow
+        } catch {}
+    }
+    Start-Sleep -Seconds 1
+}
+
+if (Test-Path $pidFile) { Remove-Item $pidFile -Force }
+
+$started = @()
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+foreach ($entry in $modules) {
+    $name = $entry.name
+    $module = $entry.module
+    $logPath = Join-Path $logsDir ("{0}-{1}.log" -f $name, $stamp)
+    $errPath = Join-Path $logsDir ("{0}-{1}.err.log" -f $name, $stamp)
+    Set-Content -Path $logPath -Value ("[start] {0} {1}" -f (Get-Date -Format o), $module) -Encoding utf8
+    Set-Content -Path $errPath -Value "" -Encoding utf8
+
+    $proc = Start-Process -FilePath $python `
+        -ArgumentList @("-u", "-m", $module) `
+        -WorkingDirectory $root `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $logPath `
+        -RedirectStandardError $errPath `
+        -PassThru
+    Add-Content -Path $pidFile -Value ("{0}`t{1}`t{2}" -f $proc.Id, $name, $module)
+    $started += [pscustomobject]@{ Name=$name; Pid=$proc.Id; Log=$logPath }
+    Write-Host ("[OK] {0,-10} pid={1,-6} log={2}" -f $name, $proc.Id, $logPath) -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "Bot + dashboard rodando. Trade dashboard: http://127.0.0.1:8000" -ForegroundColor Cyan
+Write-Host "Parar tudo:  .\scripts\stop_happynation.ps1" -ForegroundColor DarkGray
+Write-Host ""
+$started | Format-Table -AutoSize
