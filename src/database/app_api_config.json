@@ -1,0 +1,37 @@
+{
+  "traded_stocks": {
+    "3": {
+      "symbol": "JUPUSDT",
+      "baseStock": "JUP",
+      "quoteStock": "USDT",
+      "tradedQuantity": 0.0,
+      "candlePeriod": "15m",
+      "tradedPercentage": 100.0,
+      "fallBackActivated": false,
+      "mainStrategy": "string",
+      "mainStrategyArgs": {
+        "additionalProp1": {}
+      },
+      "fallbackStrategy": "string",
+      "fallbackStrategyArgs": {
+        "additionalProp1": {}
+      },
+      "acceptableLossPercentage": 0.5,
+      "stopLossPercentage": 3.5,
+      "takeProfitAtPercentage": [
+        0.0
+      ],
+      "takeProfitAmountPercentage": [
+        0.0
+      ],
+      "tempoEntreTrades": 1800,
+      "delayEntreOrdens": 3600,
+      "executeMarketOrders": false,
+      "trailingStopPercent": 100.0,
+      "trailingStopActive": false,
+      "pauseAfterTakeProfit": false,
+      "pauseAfterStopLoss": false,
+      "pauseAfterTrailingStop": false
+    }
+  }
+}

@@ -1,0 +1,1378 @@
+<!doctype html>
+<!--
+  Direcao visual: A. Terminal Bloomberg anos 90.
+  Por que: pesquisador eh ferramenta densa de leitura ao vivo.
+  Mono + alto contraste ambar/branco entrega densidade sem decoracao.
+-->
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HNB · Strategy Research Terminal</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:        #000000;
+    --bg-soft:   #050505;
+    --rule:      #1f1a10;
+    --rule-2:    #2a2316;
+    --text:      #e8e3d4;
+    --dim:       #8a7f63;
+    --dim-2:     #5b5440;
+    --amber:     #ffb000;
+    --amber-hi:  #ffd479;
+    --green:     #6cffa1;
+    --red:       #ff5d5d;
+    --blue:      #59c8ff;
+    --grey:      #c8c2ad;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "IBM Plex Mono", "Consolas", "Courier New", monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    overflow: hidden;
+  }
+  button { font-family: inherit; font-size: inherit; cursor: pointer; }
+  input, select { font-family: inherit; font-size: inherit; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .app {
+    display: grid;
+    grid-template-rows: 48px 1fr 40px;
+    height: 100vh;
+  }
+
+  /* HEADER ================================================== */
+  header {
+    border-bottom: 1px solid var(--rule-2);
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 14px;
+    padding: 0 14px;
+    background: var(--bg-soft);
+    overflow: hidden;
+  }
+  header .progress { flex: 1; min-width: 0; justify-content: flex-start; }
+  header .progress .bar { flex-shrink: 1; }
+  .brand { color: var(--amber); font-weight: 700; letter-spacing: 1px; font-size: 14px; }
+  .brand b { color: var(--amber-hi); }
+  .brand .sep { color: var(--dim-2); margin: 0 6px; }
+  .brand small { color: var(--dim); font-weight: 400; font-size: 12px; }
+  .tabs { display: flex; gap: 0; border: 1px solid var(--rule-2); }
+  .tab {
+    background: transparent; border: 0; color: var(--dim);
+    padding: 6px 16px; letter-spacing: 1px; font-size: 12px;
+    text-transform: uppercase; border-right: 1px solid var(--rule-2);
+  }
+  .tab:last-child { border-right: 0; }
+  .tab.active { background: var(--amber); color: #000; font-weight: 700; }
+  .tab:hover:not(.active) { color: var(--amber); }
+
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 12px; border: 1px solid var(--rule-2);
+    color: var(--text); font-size: 13px; letter-spacing: 1px;
+  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .status-pill[data-status="running"]  { color: var(--amber); border-color: rgba(255,176,0,.5); }
+  .status-pill[data-status="running"]  .status-dot { background: var(--amber); animation: pulse 1.1s infinite ease-in-out; }
+  .status-pill[data-status="finished"] { color: var(--green); border-color: rgba(108,255,161,.45); }
+  .status-pill[data-status="finished"] .status-dot { background: var(--green); }
+  .status-pill[data-status="stopped"]  { color: var(--grey); border-color: var(--rule-2); }
+  .status-pill[data-status="error"]    { color: var(--red); border-color: rgba(255,93,93,.45); }
+  .status-pill[data-status="error"]    .status-dot { background: var(--red); }
+  .status-pill[data-status="idle"]     .status-dot { background: var(--dim); }
+
+  .clock { color: var(--amber-hi); font-size: 15px; letter-spacing: 1px; }
+  .progress { display: flex; align-items: center; gap: 10px; color: var(--dim); font-size: 13px; letter-spacing: 1px; }
+  .progress .bar {
+    width: 220px; height: 8px; border: 1px solid var(--rule-2);
+    background: #0a0805; position: relative; overflow: hidden;
+  }
+  .progress .bar > i {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: var(--amber); width: 0%;
+    transition: width .25s ease;
+    box-shadow: inset 0 0 0 1px rgba(255,176,0,.6);
+  }
+  .progress .pct { color: var(--amber-hi); min-width: 48px; text-align: right; }
+  .actions { display: flex; gap: 6px; }
+  .btn {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--rule-2); padding: 7px 14px;
+    letter-spacing: 1px; text-transform: uppercase; font-size: 12px;
+  }
+  .btn:hover { border-color: var(--amber); color: var(--amber-hi); }
+  .btn[disabled] { opacity: .35; cursor: not-allowed; }
+  .btn.primary { border-color: var(--amber); color: var(--amber); }
+  .btn.primary:hover { background: var(--amber); color: #000; }
+  .btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .conn { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12px; letter-spacing: 1px; }
+  .conn[data-state="open"]    .status-dot { background: var(--green); }
+  .conn[data-state="closed"]  .status-dot { background: var(--red); animation: pulse 1.1s infinite; }
+
+  /* MAIN ==================================================== */
+  main { display: grid; grid-template-columns: 360px minmax(0, 1fr) 400px; overflow: hidden; }
+  .col {
+    border-right: 1px solid var(--rule-2);
+    display: grid; grid-template-rows: auto 1fr; overflow: hidden;
+  }
+  .col:last-child { border-right: 0; }
+  .col-head {
+    padding: 10px 16px; border-bottom: 1px solid var(--rule-2);
+    display: flex; align-items: center; justify-content: space-between;
+    color: var(--dim); font-size: 12px; letter-spacing: 3px;
+    text-transform: uppercase; background: #050402;
+  }
+  .col-head b { color: var(--amber); }
+  .col-body { overflow: auto; padding: 12px 16px 22px; }
+
+  /* Forms */
+  .section-divider {
+    margin: 22px 0 12px; color: var(--dim);
+    font-size: 11px; letter-spacing: 4px; text-transform: uppercase;
+    border-top: 1px solid var(--rule-2); padding-top: 12px;
+  }
+  .form { display: grid; gap: 10px; }
+  .form label {
+    display: grid; gap: 4px;
+    color: var(--dim); font-size: 11px;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .form label > span { color: var(--dim); }
+  .form input, .form select {
+    background: #060503; border: 1px solid var(--rule-2);
+    color: var(--text); padding: 7px 10px; outline: none; font-size: 13px;
+    width: 100%; min-width: 0;
+  }
+  .form input:focus { border-color: var(--amber); }
+  .form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  /* Live cards (grid mode) */
+  .live-cards { display: grid; gap: 8px; }
+  .live-card {
+    border: 1px solid var(--rule-2);
+    background: linear-gradient(180deg, #060503 0%, #000 100%);
+    padding: 10px 12px; position: relative; overflow: hidden;
+  }
+  .live-card.empty { color: var(--dim); text-align: center; padding: 22px; letter-spacing: 2px; font-size: 12px; }
+  .live-card .lbl { color: var(--dim); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
+  .live-card .strat { color: var(--amber-hi); font-size: 15px; font-weight: 700; letter-spacing: 1px; margin-top: 2px; }
+  .live-card .asset { color: var(--text); font-size: 14px; }
+  .live-card .meta { color: var(--dim); font-size: 12px; margin-top: 6px; word-break: break-all; }
+  .live-card .pulse {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--amber), transparent);
+    background-size: 200% 100%; animation: scan 1.6s linear infinite;
+  }
+
+  .params-grid { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; padding-top: 6px; }
+  .params-grid dt { color: var(--dim); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+  .params-grid dd { margin: 0; color: var(--text); font-size: 13px; text-align: right; }
+
+  /* Ranking (grid mode) */
+  .ranking-toolbar { display: flex; gap: 4px; align-items: center; }
+  .chip {
+    border: 1px solid var(--rule-2); background: transparent; color: var(--dim);
+    font-size: 12px; letter-spacing: 1px; padding: 5px 12px; text-transform: uppercase;
+  }
+  .chip.active, .chip:hover { color: var(--amber); border-color: var(--amber); }
+  .ranking {
+    display: grid;
+    grid-template-columns: 40px minmax(150px, 1fr) 80px 80px 72px 72px 72px 72px 72px 90px;
+    gap: 0; align-content: start; position: relative;
+  }
+  .ranking .head {
+    color: var(--dim); font-size: 11px; letter-spacing: 2px;
+    text-transform: uppercase; padding: 10px 8px 8px;
+    border-bottom: 1px solid var(--rule-2); background: #050402;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .ranking .row { display: contents; }
+  .ranking .cell {
+    padding: 9px 8px; border-bottom: 1px solid #0e0c08;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: background .18s ease; font-size: 13px;
+  }
+  .row:hover .cell { background: #0a0804; }
+  .row.is-new .cell { animation: blink-in .9s ease; }
+  .row.is-approved .strat-cell { color: var(--amber-hi); }
+  .row.is-approved .state-cell { color: var(--green); }
+  .row.is-pruned .cell { opacity: .65; }
+  .row.is-pruned .state-cell { color: var(--dim); }
+  .row.is-error .state-cell { color: var(--red); }
+  .rank-cell { color: var(--dim); }
+  .strat-cell { color: var(--text); font-weight: 600; letter-spacing: 1px; }
+  .strat-cell small { display: block; color: var(--dim-2); font-size: 11px; font-weight: 400; letter-spacing: 0; margin-top: 3px; }
+  .asset-cell { color: var(--amber); }
+  .num-cell { color: var(--text); text-align: right; }
+  .num-cell.good { color: var(--green); }
+  .num-cell.warn { color: var(--red); }
+  .state-cell { letter-spacing: 2px; font-size: 12px; }
+  .empty-row {
+    grid-column: 1 / -1; text-align: center; color: var(--dim);
+    padding: 60px 0; letter-spacing: 4px; font-size: 13px; text-transform: uppercase;
+  }
+
+  /* DISCOVERY ============================================== */
+  .pipeline {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 10px;
+    padding: 10px 0 18px;
+  }
+  .stage {
+    border: 1px solid var(--rule-2);
+    background: #050402;
+    min-height: 100px;
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+  }
+  .stage.active { border-color: var(--amber); box-shadow: 0 0 0 1px rgba(255,176,0,.18) inset; }
+  .stage h3 {
+    margin: 0; font-size: 11px; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--dim);
+    padding: 8px 12px; border-bottom: 1px solid var(--rule-2);
+  }
+  .stage.active h3 { color: var(--amber); }
+  .stage .count {
+    font-size: 28px; color: var(--amber-hi); padding: 6px 12px 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stage .count.green  { color: var(--green); }
+  .stage .count.dim    { color: var(--dim); }
+  .stage .body { padding: 0 12px 12px; overflow: hidden; }
+  .stage .item {
+    border-bottom: 1px dotted #0e0c08;
+    padding: 6px 0; font-size: 12px; color: var(--text);
+    display: grid; grid-template-columns: 1fr auto; gap: 8px;
+  }
+  .stage .item small { color: var(--dim); font-size: 11px; }
+  .stage .item .tpl { color: var(--amber-hi); }
+  .stage .item.failed .tpl { color: var(--dim); }
+  .stage .item.failed { opacity: .55; }
+
+  /* Origins strip */
+  .origins {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 8px; padding: 4px 0 14px;
+  }
+  .obox {
+    border: 1px solid var(--rule-2); padding: 8px 10px;
+    background: #050402;
+    display: grid; gap: 2px;
+  }
+  .obox h5 {
+    margin: 0; font-size: 11px; color: var(--dim);
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+  .obox .v { color: var(--amber-hi); font-size: 22px; font-variant-numeric: tabular-nums; }
+  .obox.grid h5      { color: var(--blue); }
+  .obox.random h5    { color: var(--amber); }
+  .obox.mutation h5  { color: #c97cff; }
+  .obox.crossover h5 { color: var(--green); }
+
+  /* origin badges */
+  .origin-tag {
+    display: inline-block;
+    padding: 2px 8px; font-size: 10px; letter-spacing: 1px;
+    text-transform: uppercase; border: 1px solid currentColor;
+    line-height: 1.4;
+  }
+  .origin-tag.grid { color: var(--blue); }
+  .origin-tag.random { color: var(--amber); }
+  .origin-tag.mutation { color: #c97cff; }
+  .origin-tag.crossover { color: var(--green); }
+
+  /* Templates strip */
+  .templates {
+    display: grid; grid-template-columns: 1fr;
+    gap: 6px; padding: 4px 0 18px;
+  }
+  .tplbox {
+    border: 1px solid var(--rule-2);
+    background: linear-gradient(180deg, #060503 0%, #000 100%);
+    padding: 8px 12px;
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: center; gap: 12px;
+  }
+  .tplbox h4 {
+    margin: 0; font-size: 13px; color: var(--amber-hi);
+    letter-spacing: 1px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tplbox .stats {
+    display: flex; gap: 10px;
+    font-size: 13px; align-items: center;
+  }
+  .tplbox .stats > div { display: flex; align-items: baseline; gap: 4px; }
+  .tplbox .stats .lbl { color: var(--dim-2); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+  .tplbox .stats .v { color: var(--text); font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 700; }
+  .tplbox .stats .v.green { color: var(--green); }
+  .tplbox .stats .v.dim { color: var(--dim); }
+
+  /* Catalog approved (grid) */
+  .catalog {
+    display: grid;
+    grid-template-columns: 90px minmax(140px, 1fr) 80px 70px 70px 70px 70px 110px;
+    gap: 0;
+    align-content: start;
+  }
+  .catalog .head {
+    color: var(--dim); font-size: 11px; letter-spacing: 2px;
+    text-transform: uppercase; padding: 10px 8px 8px;
+    border-bottom: 1px solid var(--rule-2); background: #050402;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .catalog .row { display: contents; }
+  .catalog .cell {
+    padding: 9px 8px; border-bottom: 1px solid #0e0c08;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: 13px;
+  }
+  .catalog .id-cell { color: var(--dim-2); font-size: 12px; }
+  .catalog .row .strat-cell { color: var(--amber-hi); }
+  .catalog .num-cell { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Decisions feed */
+  .decisions { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .decisions li {
+    border: 1px solid var(--rule-2); padding: 12px 14px;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 12px;
+    background: #050402;
+  }
+  .decisions .marker {
+    width: 6px; align-self: stretch; background: var(--dim);
+  }
+  .decisions li.approved .marker { background: var(--green); }
+  .decisions li.rejected .marker { background: var(--dim-2); }
+  .decisions .body { display: grid; gap: 4px; }
+  .decisions .tag {
+    font-size: 11px; letter-spacing: 2px; color: var(--dim);
+    text-transform: uppercase;
+  }
+  .decisions li.approved .tag { color: var(--green); }
+  .decisions .label { color: var(--amber-hi); font-size: 14px; font-weight: 700; }
+  .decisions .reason { color: var(--dim); font-size: 12px; }
+  .decisions .scoreCol {
+    align-self: center; color: var(--amber-hi);
+    font-size: 18px; font-variant-numeric: tabular-nums; font-weight: 700;
+  }
+
+  /* Validating panel */
+  .validating { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .validating li {
+    border: 1px solid rgba(255,176,0,.3);
+    background: linear-gradient(180deg, rgba(255,176,0,.05), transparent);
+    padding: 8px 10px; display: grid; gap: 6px;
+  }
+  .validating .head {
+    display: flex; justify-content: space-between;
+    color: var(--amber-hi); font-size: 14px; font-weight: 700;
+  }
+  .scenario-grid {
+    display: grid; grid-template-columns: 90px 80px 70px repeat(4, 1fr);
+    font-size: 12px; gap: 0;
+  }
+  .scenario-grid .h {
+    color: var(--dim); font-size: 10px; letter-spacing: 1px;
+    text-transform: uppercase; padding: 4px 6px;
+    border-bottom: 1px solid var(--rule-2);
+  }
+  .scenario-grid .c {
+    padding: 4px 6px; border-bottom: 1px dotted #0e0c08;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .scenario-grid .c.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scenario-grid .c.pass { color: var(--green); }
+  .scenario-grid .c.fail { color: var(--red); }
+  .scenario-grid .c.split-full  { color: var(--amber-hi); }
+  .scenario-grid .c.split-train { color: var(--blue); }
+  .scenario-grid .c.split-test  { color: #c97cff; }
+
+  /* Criteria checklist */
+  .criteria { display: grid; gap: 3px; padding: 8px 0 4px; }
+  .crit {
+    display: grid; grid-template-columns: 18px 1fr auto auto;
+    gap: 10px; padding: 5px 8px; font-size: 12px;
+    border-bottom: 1px dotted #0e0c08;
+  }
+  .crit .icon { color: var(--red); font-weight: 700; font-size: 14px; }
+  .crit.passed .icon { color: var(--green); }
+  .crit .name { color: var(--text); }
+  .crit .val  { color: var(--amber-hi); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .crit .thr  { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+  /* Log */
+  .log-toolbar { display: flex; align-items: center; gap: 6px; }
+  .log { list-style: none; margin: 0; padding: 0; font-size: 13px; line-height: 1.55; }
+  .log li {
+    padding: 5px 0; border-bottom: 1px dotted #0e0c08;
+    display: grid; grid-template-columns: 80px 16px 1fr;
+    gap: 8px; color: var(--text);
+  }
+  .log li time { color: var(--dim-2); font-size: 12px; }
+  .log .lvl { font-size: 14px; line-height: 1; font-weight: 700; }
+  .log li[data-lvl="ok"]   .lvl { color: var(--green); }
+  .log li[data-lvl="warn"] .lvl { color: var(--amber); }
+  .log li[data-lvl="err"]  .lvl { color: var(--red); }
+  .log li[data-lvl="info"] .lvl { color: var(--dim); }
+  .log li.new { animation: blink-in .9s ease; }
+
+  /* Footer */
+  footer {
+    border-top: 1px solid var(--rule-2);
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    background: var(--bg-soft);
+  }
+  footer .stat {
+    border-right: 1px solid var(--rule-2); padding: 6px 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; color: var(--dim); font-size: 10px;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    overflow: hidden; min-width: 0;
+  }
+  footer .stat span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  footer .stat:last-child { border-right: 0; }
+  footer .stat b { color: var(--text); font-size: 18px; letter-spacing: 0; font-weight: 700; }
+  footer .stat.approved b { color: var(--green); }
+  footer .stat.pruned b   { color: var(--dim); }
+  footer .stat.errors b   { color: var(--red); }
+  footer .stat.best b     { color: var(--amber-hi); }
+
+  /* Modals */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,.85);
+    display: none; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: var(--bg); border: 1px solid var(--amber);
+    width: 90vw; max-width: 1200px; height: 80vh;
+    display: grid; grid-template-rows: auto 1fr; padding: 0;
+  }
+  .modal header {
+    background: #060402; border-bottom: 1px solid var(--rule-2);
+    padding: 8px 14px; display: flex; align-items: center;
+    justify-content: space-between;
+  }
+  .modal-body { overflow: auto; padding: 14px; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: #050402; }
+  ::-webkit-scrollbar-thumb { background: #1a1408; border: 1px solid #2a2316; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--rule-2); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; } 50% { opacity: .55; }
+  }
+  @keyframes scan {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  @keyframes blink-in {
+    0%   { background: rgba(255,176,0,.18); }
+    100% { background: transparent; }
+  }
+
+  .hidden { display: none !important; }
+  @media (max-width: 1400px) {
+    main { grid-template-columns: 320px 1fr 360px; }
+    body { font-size: 13px; }
+  }
+  @media (max-width: 1200px) {
+    main { grid-template-columns: 290px 1fr 330px; }
+    .ranking { grid-template-columns: 40px minmax(140px,1fr) 80px 80px 70px 70px 70px 70px 70px 90px; }
+    .pipeline { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="brand">HNB <b>RESEARCH</b><span class="sep">·</span><small>strategy terminal</small></div>
+    <div class="tabs" id="tabs">
+      <button class="tab" data-mode="discovery">Descobrir</button>
+      <button class="tab" data-mode="grid">Grid</button>
+    </div>
+    <div class="status-pill" id="statusPill" data-status="idle">
+      <span class="status-dot"></span><span id="statusText">OCIOSO</span>
+    </div>
+    <div class="progress">
+      <span id="progressLabel">0 / 0</span>
+      <div class="bar"><i id="progressBar"></i></div>
+      <span class="pct num" id="progressPct">0%</span>
+      <span style="color:var(--dim-2)">|</span>
+      <span class="clock num" id="clock">00:00:00</span>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="btnStart">Iniciar</button>
+      <button class="btn danger"  id="btnStop" disabled>Parar</button>
+      <button class="btn" id="btnCatalog">Catalogo</button>
+      <button class="btn" id="btnActive">Bot ativo</button>
+    </div>
+    <div class="conn" id="conn" data-state="closed">
+      <span class="status-dot"></span><span id="connText">conectando</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- LEFT — params + sidebar -->
+    <section class="col">
+      <div class="col-head">
+        <span id="leftTitle">Parametros</span>
+        <span id="leftBadge" class="num">-</span>
+      </div>
+      <div class="col-body">
+
+        <!-- DISCOVERY MODE FORM -->
+        <div id="discoveryForm">
+          <div class="section-divider" style="margin-top:0;border:0;padding:0;color:var(--amber)">DESCOBERTA</div>
+          <form class="form" onsubmit="return false;">
+            <label><span>Ativos</span><input id="d-assets" value="BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,JUPUSDT"></label>
+            <label><span>History</span><input id="d-history" value="6 months ago UTC"></label>
+            <div class="row">
+              <label><span>Cand/round</span><input id="d-perround" type="number" min="5" max="200" value="40"></label>
+              <label><span>Max rounds</span><input id="d-maxrounds" type="number" min="0" value="0" title="0 = infinito"></label>
+            </div>
+            <div class="row">
+              <label><span>Win min %</span><input id="d-winrate" type="number" value="50"></label>
+              <label><span>DD max %</span><input id="d-dd" type="number" value="25"></label>
+            </div>
+            <div class="row">
+              <label><span>PF min</span><input id="d-pf" type="number" step="0.05" value="1.15"></label>
+              <label><span>Trades min</span><input id="d-trades" type="number" value="15"></label>
+            </div>
+            <label><span>Fees</span><input id="d-fees" value="0.05,0.1,0.2"></label>
+          </form>
+
+          <div class="section-divider">Como pesquisa novas estrategias</div>
+          <div class="origins" id="originStats">
+            <div class="obox grid"><h5>GRID</h5><div class="v num" id="oGrid">0</div></div>
+            <div class="obox random"><h5>RANDOM</h5><div class="v num" id="oRandom">0</div></div>
+            <div class="obox mutation"><h5>MUTACAO</h5><div class="v num" id="oMutation">0</div></div>
+            <div class="obox crossover"><h5>CROSSOVER</h5><div class="v num" id="oCrossover">0</div></div>
+          </div>
+          <div style="font-size:10px;color:var(--dim-2);line-height:1.5;margin-bottom:14px">
+            <b style="color:var(--blue)">grid</b>: varre pontos pre-definidos ·
+            <b style="color:var(--amber)">random</b>: amostragem continua ·
+            <b style="color:#c97cff">mutacao</b>: perturba aprovadas ·
+            <b style="color:var(--green)">crossover</b>: cruza 2 aprovadas
+          </div>
+
+          <div class="section-divider">Templates ativos</div>
+          <div class="templates" id="tplStats"></div>
+        </div>
+
+        <!-- GRID MODE FORM -->
+        <div id="gridForm" class="hidden">
+          <div class="live-cards" id="liveCards">
+            <div class="live-card empty">aguardando jobs</div>
+          </div>
+          <div class="section-divider">Parametros desta rodada</div>
+          <dl class="params-grid" id="paramsGrid"></dl>
+          <div class="section-divider">Nova rodada (grid)</div>
+          <form class="form" onsubmit="return false;">
+            <label><span>Ativos</span><input id="f-assets" value="BTCUSDT,ETHUSDT,SOLUSDT,JUPUSDT"></label>
+            <label><span>History</span><input id="f-history" value="8 months ago UTC"></label>
+            <div class="row">
+              <label><span>Workers</span><input id="f-workers" type="number" min="1" max="16" value="4"></label>
+              <label><span>Win min %</span><input id="f-winrate" type="number" value="50"></label>
+            </div>
+            <div class="row">
+              <label><span>DD max %</span><input id="f-dd" type="number" value="25"></label>
+              <label><span>PF min</span><input id="f-pf" type="number" step="0.05" value="1.15"></label>
+            </div>
+            <label style="display:flex;flex-direction:row;align-items:center;gap:8px">
+              <input type="checkbox" id="f-extras" style="width:auto"> <span>incluir extras</span>
+            </label>
+          </form>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- CENTER -->
+    <section class="col">
+      <div class="col-head">
+        <span id="centerTitle">Pipeline ao vivo</span>
+        <div class="ranking-toolbar" id="centerToolbar"></div>
+      </div>
+      <div class="col-body" id="centerBody">
+
+        <!-- DISCOVERY VIEW -->
+        <div id="discoveryView">
+          <div class="pipeline" id="pipeline">
+            <div class="stage" data-stage="generated">
+              <h3>1. Gerados</h3>
+              <div class="count num" id="cntGenerated">0</div>
+              <div class="body" id="poolGenerated"></div>
+            </div>
+            <div class="stage" data-stage="quick">
+              <h3>2. Filtro rapido</h3>
+              <div class="count num" id="cntQuick">0</div>
+              <div class="body" id="poolQuick"></div>
+            </div>
+            <div class="stage" data-stage="validating">
+              <h3>3. Validando</h3>
+              <div class="count num" id="cntValidating">0</div>
+              <div class="body" id="poolValidating"></div>
+            </div>
+            <div class="stage" data-stage="approved">
+              <h3>4. Aprovadas</h3>
+              <div class="count num green" id="cntApproved">0</div>
+              <div class="body" id="poolApproved"></div>
+            </div>
+          </div>
+
+          <div class="section-divider">Em validacao multi-cenario</div>
+          <ul class="validating" id="validatingList">
+            <li style="color:var(--dim);text-align:center;border-style:dashed">nenhum candidato em validacao</li>
+          </ul>
+
+          <div class="section-divider">Decisoes recentes</div>
+          <ul class="decisions" id="decisionsList">
+            <li><div class="marker"></div><div class="body"><span class="tag">aguardando</span><span class="label">sem decisoes ainda</span></div><span></span></li>
+          </ul>
+        </div>
+
+        <!-- GRID VIEW -->
+        <div id="gridView" class="hidden">
+          <div class="ranking-toolbar" style="padding:6px 0 12px;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="chip active" data-filter="all">todos</button>
+            <button class="chip" data-filter="approved">aprov</button>
+            <button class="chip" data-filter="pruned">podadas</button>
+            <span style="color:var(--dim-2);margin:0 4px">|</span>
+            <button class="chip active" data-sort="score">score</button>
+            <button class="chip" data-sort="winrate_pct">win</button>
+            <button class="chip" data-sort="profit_factor">pf</button>
+            <button class="chip" data-sort="max_drawdown_pct">dd</button>
+          </div>
+          <div class="ranking" id="ranking">
+            <div class="head rank-cell">#</div>
+            <div class="head">Estrategia</div>
+            <div class="head">Ativo</div>
+            <div class="head" style="text-align:right">Score</div>
+            <div class="head" style="text-align:right">Win%</div>
+            <div class="head" style="text-align:right">PF</div>
+            <div class="head" style="text-align:right">DD%</div>
+            <div class="head" style="text-align:right">Trades</div>
+            <div class="head" style="text-align:right">Loss</div>
+            <div class="head">Estado</div>
+            <div class="empty-row" id="rankingEmpty">sem resultados ainda</div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- RIGHT -->
+    <section class="col">
+      <div class="col-head">
+        <span>Log <b>ao vivo</b></span>
+        <div class="log-toolbar">
+          <button class="chip active" id="btnAutoscroll">autoscroll</button>
+          <button class="chip" id="btnClearLog">limpar</button>
+        </div>
+      </div>
+      <div class="col-body" id="logBody"><ul class="log" id="log"></ul></div>
+    </section>
+  </main>
+
+  <footer id="footer">
+    <div class="stat"><span>Round</span><b class="num" id="footRound">0</b></div>
+    <div class="stat"><span>Gerados</span><b class="num" id="footGenerated">0</b></div>
+    <div class="stat"><span>Filtro+</span><b class="num" id="footFilteredIn">0</b></div>
+    <div class="stat approved"><span>Aprovadas</span><b class="num" id="footApproved">0</b></div>
+    <div class="stat pruned"><span>Rejeitadas</span><b class="num" id="footRejected">0</b></div>
+    <div class="stat"><span>Catalogo</span><b class="num" id="footCatalog">0</b></div>
+    <div class="stat best"><span>Top score</span><b class="num" id="footBest">-</b></div>
+  </footer>
+</div>
+
+<!-- CATALOG MODAL -->
+<div class="modal-bg" id="catalogModal">
+  <div class="modal">
+    <header>
+      <div style="color:var(--amber);font-weight:700;letter-spacing:1px">CATALOGO DE ESTRATEGIAS APROVADAS</div>
+      <button class="btn" id="closeCatalog">Fechar</button>
+    </header>
+    <div class="modal-body">
+      <div id="catalogStatsLine" style="margin-bottom:14px;color:var(--dim);font-size:11px"></div>
+      <div class="catalog" id="catalogTable">
+        <div class="head">ID</div>
+        <div class="head">Template</div>
+        <div class="head" style="text-align:right">Score</div>
+        <div class="head" style="text-align:right">Win%</div>
+        <div class="head" style="text-align:right">PF</div>
+        <div class="head" style="text-align:right">DD%</div>
+        <div class="head" style="text-align:right">Cen</div>
+        <div class="head">Aprovado em</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ============= STATE =====================================================
+const initialState = {
+  status: "idle", mode: "discovery", ran_at: null, started_ts: null,
+  duration_s: 0, totals: { tested: 0, approved: 0, pruned: 0, errors: 0 },
+  total_jobs: 0, current_jobs: [], params: {}, results: [], best: null, logs: [],
+  discovery: {
+    active: false, round: 0,
+    stats: { candidates_generated: 0, filtered_in: 0, filtered_out: 0, validated: 0, approved: 0, rejected: 0, errors: 0 },
+    templates: [], risk_profiles: [], fee_levels: [], candidates_per_round: 0,
+    current_candidates: [], validating: [], recent_decisions: [],
+    catalog_stats: { rounds: 0, total: 0, approved: 0, rejected: 0, per_template: {} },
+    approved_top: [], scenarios_progress: {},
+  },
+};
+let state = JSON.parse(JSON.stringify(initialState));
+const ui = { mode: "discovery", filter: "all", sort: "score", autoscroll: true };
+
+// ============= HELPERS ===================================================
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d = 2) => (v == null || isNaN(v)) ? "-" : Number(v).toFixed(d);
+const fmtInt = (v) => (v == null || isNaN(v)) ? "-" : Math.round(v).toString();
+const pad2 = (n) => n.toString().padStart(2, "0");
+function fmtDuration(s) {
+  if (!s || s < 0) return "00:00:00";
+  s = Math.floor(s);
+  return `${pad2(Math.floor(s/3600))}:${pad2(Math.floor((s%3600)/60))}:${pad2(s%60)}`;
+}
+function fmtClock(ts) {
+  const d = new Date(ts * 1000);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+// ============= MODE TOGGLE ==============================================
+function setMode(mode) {
+  ui.mode = mode;
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.mode === mode));
+  $("discoveryForm").classList.toggle("hidden", mode !== "discovery");
+  $("gridForm").classList.toggle("hidden", mode !== "grid");
+  $("discoveryView").classList.toggle("hidden", mode !== "discovery");
+  $("gridView").classList.toggle("hidden", mode !== "grid");
+  $("centerTitle").textContent = mode === "discovery" ? "Pipeline ao vivo" : "Ranking ao vivo";
+  $("leftTitle").textContent   = mode === "discovery" ? "Setup descoberta" : "Em execucao";
+  renderAll();
+}
+
+// ============= RENDER ====================================================
+function renderStatus() {
+  const map = { idle: "OCIOSO", running: "PESQUISANDO", finished: "CONCLUIDO", stopped: "INTERROMPIDO", error: "ERRO" };
+  $("statusPill").dataset.status = state.status;
+  $("statusText").textContent = map[state.status] || state.status.toUpperCase();
+  $("btnStart").disabled = state.status === "running";
+  $("btnStop").disabled  = state.status !== "running";
+}
+
+function renderProgress() {
+  if (state.mode === "discovery" && state.discovery.active) {
+    const stats = state.discovery.stats;
+    const target = state.discovery.candidates_per_round || 0;
+    const done = stats.validated + stats.filtered_out;
+    const pct = target > 0 ? Math.min(100, (done / target) * 100) : 0;
+    $("progressLabel").textContent = `R${state.discovery.round} · ${done}/${target}`;
+    $("progressBar").style.width = pct.toFixed(1) + "%";
+    $("progressPct").textContent = pct.toFixed(0) + "%";
+  } else {
+    const total = state.total_jobs || 0;
+    const done = state.totals.tested;
+    const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+    $("progressLabel").textContent = `${done} / ${total}`;
+    $("progressBar").style.width = pct.toFixed(1) + "%";
+    $("progressPct").textContent = pct.toFixed(0) + "%";
+  }
+}
+
+function renderClock() {
+  if (state.status === "running" && state.started_ts) {
+    $("clock").textContent = fmtDuration(Date.now()/1000 - state.started_ts);
+  } else if (state.duration_s) {
+    $("clock").textContent = fmtDuration(state.duration_s);
+  } else {
+    $("clock").textContent = "00:00:00";
+  }
+}
+
+// ===== DISCOVERY: pipeline ===========
+function renderTemplateStats() {
+  const root = $("tplStats");
+  const templates = state.discovery.templates.length ? state.discovery.templates :
+    ["DualMA_Trend","RSI_Reversal","Bollinger_Breakout","MACD_Trend","Donchian_Breakout"];
+  const per = state.discovery.catalog_stats.per_template || {};
+  root.innerHTML = templates.map(name => {
+    const slot = per[name] || { total: 0, approved: 0, rejected: 0 };
+    return `
+      <div class="tplbox">
+        <h4>${escapeHtml(name)}</h4>
+        <div class="stats">
+          <div><span class="lbl">tot</span><span class="v">${slot.total}</span></div>
+          <div><span class="lbl">ok</span><span class="v" style="color:var(--green)">${slot.approved}</span></div>
+          <div><span class="lbl">rej</span><span class="v" style="color:var(--dim)">${slot.rejected}</span></div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function renderPipeline() {
+  const cands = state.discovery.current_candidates;
+  const generated = cands;
+  const quickPassed = cands.filter(c => c.stage === "quick_passed" || c.stage === "approved" || c.stage === "rejected" && c.quick);
+  const validating = state.discovery.validating;
+  const approved = cands.filter(c => c.stage === "approved");
+
+  $("cntGenerated").textContent  = state.discovery.stats.candidates_generated;
+  $("cntQuick").textContent      = state.discovery.stats.filtered_in;
+  $("cntValidating").textContent = validating.length;
+  $("cntApproved").textContent   = state.discovery.stats.approved;
+
+  const renderItem = (c, klass = "") => `
+    <div class="item ${klass}">
+      <div>
+        <span class="origin-tag ${c.origin||'grid'}">${(c.origin||'grid').substring(0,4)}</span>
+        <span class="tpl"> ${escapeHtml(c.template)}</span>
+        <br><small>${escapeHtml((c.label||c.id||"").substring(0,38))}</small>
+        ${c.parents && c.parents.length ? `<br><small style="color:var(--dim-2)">filho de ${c.parents.map(p=>escapeHtml(p.substring(0,8))).join(' + ')}</small>` : ''}
+      </div>
+      <small>${c.stage === "approved" ? "+"+fmt(c.score,1) : ""}</small>
+    </div>`;
+
+  $("poolGenerated").innerHTML  = generated.slice(-6).reverse().map(c => renderItem(c)).join("") || `<div style="color:var(--dim-2);font-size:10px;padding:6px 0">aguardando</div>`;
+  $("poolQuick").innerHTML      = quickPassed.slice(-6).reverse().map(c => renderItem(c)).join("") || `<div style="color:var(--dim-2);font-size:10px;padding:6px 0">-</div>`;
+  $("poolValidating").innerHTML = validating.slice(-6).reverse().map(v => `
+    <div class="item">
+      <div><span class="tpl">${escapeHtml(v.template||"-")}</span><br><small>${v.scenarios_done}/${v.scenarios_planned} cenarios</small></div>
+      <small>${escapeHtml((v.id||"").substring(0,8))}</small>
+    </div>`).join("") || `<div style="color:var(--dim-2);font-size:10px;padding:6px 0">-</div>`;
+  $("poolApproved").innerHTML   = approved.slice(-6).reverse().map(c => renderItem(c)).join("") || `<div style="color:var(--dim-2);font-size:10px;padding:6px 0">-</div>`;
+
+  // active stage indicator
+  document.querySelectorAll(".stage").forEach(s => s.classList.remove("active"));
+  if (validating.length) document.querySelector('.stage[data-stage="validating"]').classList.add("active");
+  else if (state.status === "running") document.querySelector('.stage[data-stage="generated"]').classList.add("active");
+}
+
+function renderValidating() {
+  const root = $("validatingList");
+  const list = state.discovery.validating;
+  if (!list.length) {
+    root.innerHTML = `<li style="color:var(--dim);text-align:center;border-style:dashed;padding:14px">nenhum candidato em validacao</li>`;
+    return;
+  }
+  root.innerHTML = list.map(v => {
+    const scenarios = state.discovery.scenarios_progress[v.id] || [];
+    const rows = scenarios.map(m => {
+      const split = (m.split || "full").replace("oos_", "");
+      const passCls = m.error ? "fail" : (m.passed ? "pass" : "");
+      const win = (m.winrate_pct || 0).toFixed(1);
+      const pf = (m.profit_factor || 0).toFixed(2);
+      const dd = (m.max_drawdown_pct || 0).toFixed(1);
+      const tr = (m.total_trades || 0);
+      return `
+        <div class="c" title="${escapeHtml(m.asset||"-")}">${escapeHtml(m.asset||"-")}</div>
+        <div class="c split-${split}">${split}</div>
+        <div class="c num">fee ${(m.fee_pct||0).toFixed(2)}</div>
+        <div class="c num ${(+win)>=50?'pass':((+win)>=40?'':'fail')}">${win}%</div>
+        <div class="c num ${(+pf)>=1.2?'pass':((+pf)>=1.0?'':'fail')}">${pf}</div>
+        <div class="c num ${(+dd)<=20?'pass':((+dd)<=30?'':'fail')}">${dd}%</div>
+        <div class="c num">${tr}</div>`;
+    }).join("");
+    return `
+      <li>
+        <div class="head">
+          <span>${escapeHtml(v.template)} <small style="color:var(--dim-2)">${escapeHtml((v.id||"").substring(0,8))}</small></span>
+          <span style="color:var(--dim);font-size:10px">${v.scenarios_done}/${v.scenarios_planned} cenarios</span>
+        </div>
+        <div class="scenario-grid">
+          <div class="h">Ativo</div>
+          <div class="h">Split</div>
+          <div class="h" style="text-align:right">Fee</div>
+          <div class="h" style="text-align:right">Win</div>
+          <div class="h" style="text-align:right">PF</div>
+          <div class="h" style="text-align:right">DD</div>
+          <div class="h" style="text-align:right">Tr</div>
+          ${rows}
+        </div>
+      </li>`;
+  }).join("");
+}
+
+function renderDecisions() {
+  const root = $("decisionsList");
+  const list = state.discovery.recent_decisions;
+  if (!list.length) {
+    root.innerHTML = `<li><div class="marker"></div><div class="body"><span class="tag">aguardando</span><span class="label">sem decisoes ainda</span></div><span></span></li>`;
+    return;
+  }
+  root.innerHTML = list.slice(0, 12).map(d => {
+    const e = d.entry || {};
+    const tpl = e.template || "-";
+    const params = e.params ? Object.entries(e.params).map(([k,v]) => `${k}=${v}`).join(" ") : "";
+    const checks = d.criteria_checks || [];
+    const checkHtml = checks.length ? `
+      <div class="criteria">
+        ${checks.map(c => `
+          <div class="crit ${c.passed ? 'passed' : ''}">
+            <span class="icon">${c.passed ? '+' : 'x'}</span>
+            <span class="name">${escapeHtml(c.name)}</span>
+            <span class="val">${c.value}</span>
+            <span class="thr">${c.op} ${c.threshold}</span>
+          </div>
+        `).join("")}
+      </div>` : "";
+    const origin = e.origin || 'grid';
+    const parents = (e.parents||[]).length
+      ? `<span style="color:var(--dim-2);font-size:9px">filho de ${(e.parents||[]).map(p=>escapeHtml(p.substring(0,8))).join(' + ')}</span>`
+      : "";
+    return `
+      <li class="${d.approved ? 'approved' : 'rejected'}">
+        <div class="marker"></div>
+        <div class="body">
+          <span class="tag">
+            <span class="origin-tag ${origin}">${origin.substring(0,4)}</span>
+            ${d.approved ? 'aprovada' : 'rejeitada'} · ${escapeHtml((d.id||"").substring(0,8))}
+          </span>
+          <span class="label">${escapeHtml(tpl)}</span>
+          <span class="reason">${escapeHtml(params.substring(0, 80))}</span>
+          ${parents}
+          ${checkHtml}
+        </div>
+        <div class="scoreCol">${fmt(d.score, 1)}</div>
+      </li>`;
+  }).join("");
+}
+
+// ===== GRID MODE: ranking ===========
+const seenRows = new Set();
+function renderRanking() {
+  const root = $("ranking");
+  const empty = $("rankingEmpty");
+  empty.style.display = "none";
+
+  let rows = state.results.slice();
+  if (ui.filter === "approved") rows = rows.filter(r => r.passed);
+  else if (ui.filter === "pruned") rows = rows.filter(r => !r.passed);
+  if (ui.sort === "score") rows.sort((a,b) => (b.score||0) - (a.score||0));
+  else if (ui.sort === "winrate_pct") rows.sort((a,b) => (b.winrate_pct||0) - (a.winrate_pct||0));
+  else if (ui.sort === "profit_factor") rows.sort((a,b) => (b.profit_factor||0) - (a.profit_factor||0));
+  else if (ui.sort === "max_drawdown_pct") rows.sort((a,b) => (a.max_drawdown_pct||0) - (b.max_drawdown_pct||0));
+  rows = rows.slice(0, 30);
+
+  Array.from(root.querySelectorAll(".row")).forEach(el => el.remove());
+  if (!rows.length) { empty.style.display = ""; return; }
+  rows.forEach((r, idx) => {
+    const key = `${r.strategy}__${r.asset}__${r.params_str || ""}`;
+    const isNew = !seenRows.has(key);
+    seenRows.add(key);
+    const sc = r.error ? "is-error" : (r.passed ? "is-approved" : "is-pruned");
+    const sl = r.error ? "ERRO" : (r.passed ? "APROVADA" : "podada");
+    root.insertAdjacentHTML("beforeend", `
+      <div class="row ${sc} ${isNew ? "is-new" : ""}">
+        <div class="cell rank-cell num">${pad2(idx+1)}</div>
+        <div class="cell strat-cell">${escapeHtml(r.strategy)}<small>${escapeHtml(r.params_str || "")}</small></div>
+        <div class="cell asset-cell">${escapeHtml(r.asset)}</div>
+        <div class="cell num-cell">${fmt(r.score,1)}</div>
+        <div class="cell num-cell ${(r.winrate_pct||0)>=50?"good":""}">${fmt(r.winrate_pct,1)}</div>
+        <div class="cell num-cell ${(r.profit_factor||0)>=1.3?"good":""}">${fmt(r.profit_factor,2)}</div>
+        <div class="cell num-cell ${(r.max_drawdown_pct||0)>25?"warn":""}">${fmt(r.max_drawdown_pct,1)}</div>
+        <div class="cell num-cell">${fmtInt(r.total_trades)}</div>
+        <div class="cell num-cell">${fmtInt(r.max_loss_streak)}</div>
+        <div class="cell state-cell">${sl}</div>
+      </div>`);
+  });
+}
+
+function renderLiveCards() {
+  const root = $("liveCards");
+  if (!state.current_jobs.length) {
+    root.innerHTML = `<div class="live-card empty">${state.status === "running" ? "preparando proximos jobs..." : "nenhum job em execucao"}</div>`;
+    return;
+  }
+  root.innerHTML = state.current_jobs.slice(-6).reverse().map(j => `
+    <div class="live-card">
+      <div class="lbl">testando</div>
+      <div class="strat">${escapeHtml(j.strategy||"-")}</div>
+      <div class="asset">${escapeHtml(j.asset||"-")}</div>
+      ${j.params_str ? `<div class="meta">${escapeHtml(j.params_str)}</div>` : ""}
+      <div class="pulse"></div>
+    </div>`).join("");
+}
+
+function renderParams() {
+  const root = $("paramsGrid");
+  const p = state.params || {};
+  if (!Object.keys(p).length) { root.innerHTML = `<dt style="grid-column:1/-1;color:var(--dim-2);text-align:center;padding:6px 0">sem rodada ativa</dt>`; return; }
+  root.innerHTML = Object.entries(p).map(([k,v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(Array.isArray(v)?v.join(","):String(v))}</dd>`).join("");
+}
+
+// ===== Footer ==========
+function renderFooter() {
+  const cs = state.discovery.catalog_stats;
+  const by = state.discovery.stats.by_origin || {};
+  $("oGrid").textContent      = by.grid || 0;
+  $("oRandom").textContent    = by.random || 0;
+  $("oMutation").textContent  = by.mutation || 0;
+  $("oCrossover").textContent = by.crossover || 0;
+  $("footRound").textContent      = state.discovery.round || cs.rounds || 0;
+  $("footGenerated").textContent  = state.discovery.stats.candidates_generated;
+  $("footFilteredIn").textContent = state.discovery.stats.filtered_in;
+  $("footApproved").textContent   = cs.approved || state.discovery.stats.approved;
+  $("footRejected").textContent   = cs.rejected || state.discovery.stats.rejected;
+  $("footCatalog").textContent    = cs.total || 0;
+  if (state.discovery.recent_decisions.length) {
+    const top = state.discovery.recent_decisions.find(d => d.approved);
+    $("footBest").textContent = top ? fmt(top.score, 1) : "-";
+  } else if (state.best) {
+    $("footBest").textContent = fmt(state.best.score, 1);
+  } else {
+    $("footBest").textContent = "-";
+  }
+}
+
+// ===== Log ==========
+function appendLog(entry, animate = true) {
+  const ul = $("log");
+  const li = document.createElement("li");
+  li.dataset.lvl = entry.level || "info";
+  if (animate) li.classList.add("new");
+  const icon = entry.level === "ok" ? "+" : entry.level === "warn" ? "!" : entry.level === "err" ? "x" : "·";
+  li.innerHTML = `<time>${escapeHtml(fmtClock(entry.ts))}</time><span class="lvl">${icon}</span><span>${escapeHtml(entry.msg)}</span>`;
+  ul.appendChild(li);
+  while (ul.children.length > 250) ul.removeChild(ul.firstChild);
+  if (ui.autoscroll) $("logBody").scrollTop = $("logBody").scrollHeight;
+}
+
+function renderAll() {
+  renderStatus();
+  renderProgress();
+  renderClock();
+  renderTemplateStats();
+  if (ui.mode === "discovery") {
+    renderPipeline();
+    renderValidating();
+    renderDecisions();
+  } else {
+    renderLiveCards();
+    renderParams();
+    renderRanking();
+  }
+  renderFooter();
+}
+
+// ============= EVENT HANDLERS ============================================
+function applyEvent(ev) {
+  switch (ev.type) {
+    case "snapshot":
+      state = JSON.parse(JSON.stringify(initialState));
+      Object.assign(state, ev.state);
+      $("log").innerHTML = "";
+      seenRows.clear();
+      (state.logs || []).forEach(e => appendLog(e, false));
+      // sync mode tab if discovery is active or recently was
+      if (state.mode === "discovery") setMode("discovery"); else setMode(ui.mode);
+      renderAll();
+      break;
+
+    case "run_started":
+      state.mode = "grid";
+      state.status = "running";
+      state.ran_at = ev.ran_at;
+      state.started_ts = ev.ts;
+      state.duration_s = 0;
+      state.total_jobs = ev.total_jobs;
+      state.params = ev.params || {};
+      state.totals = { tested: 0, approved: 0, pruned: 0, errors: 0 };
+      state.results = []; state.current_jobs = []; state.best = null;
+      seenRows.clear();
+      setMode("grid");
+      break;
+    case "job_started":
+      state.current_jobs.push({ strategy: ev.strategy, asset: ev.asset, params_str: ev.params || "", started_ts: ev.ts });
+      renderLiveCards();
+      break;
+    case "job_done": {
+      const r = ev.result;
+      const key = `${r.strategy}__${r.asset}__${r.params_str || ""}`;
+      state.current_jobs = state.current_jobs.filter(j => `${j.strategy}__${j.asset}__${j.params_str || ""}` !== key);
+      state.totals.tested += 1;
+      if (r.error) state.totals.errors += 1;
+      else if (r.passed) state.totals.approved += 1;
+      else state.totals.pruned += 1;
+      const ex = state.results.findIndex(x => `${x.strategy}__${x.asset}__${x.params_str || ""}` === key);
+      if (ex >= 0) state.results[ex] = r; else state.results.push(r);
+      state.results.sort((a,b) => (b.score||0) - (a.score||0));
+      state.results = state.results.slice(0, 80);
+      state.best = state.results[0] || null;
+      renderProgress(); renderLiveCards(); renderRanking(); renderFooter();
+      break;
+    }
+    case "log": appendLog(ev); break;
+    case "run_finished":
+      state.status = "finished"; state.duration_s = ev.duration_s || 0; state.current_jobs = [];
+      renderAll(); break;
+    case "run_stopped":
+      state.status = "stopped"; state.duration_s = ev.duration_s || state.duration_s; state.current_jobs = [];
+      renderAll(); break;
+    case "run_failed":
+      state.status = "error"; state.current_jobs = []; renderAll(); break;
+
+    // ----- DISCOVERY EVENTS -----
+    case "discovery_started":
+      state.mode = "discovery"; state.status = "running";
+      state.started_ts = ev.ts; state.ran_at = ev.ran_at;
+      state.discovery.active = true; state.discovery.round = 0;
+      state.discovery.templates = ev.templates || [];
+      state.discovery.risk_profiles = ev.risk_profiles || [];
+      state.discovery.fee_levels = ev.fee_levels || [];
+      state.discovery.candidates_per_round = ev.candidates_per_round;
+      state.discovery.current_candidates = [];
+      state.discovery.validating = [];
+      state.discovery.recent_decisions = [];
+      state.discovery.scenarios_progress = {};
+      state.discovery.stats = { candidates_generated: 0, filtered_in: 0, filtered_out: 0, validated: 0, approved: 0, rejected: 0, errors: 0 };
+      setMode("discovery");
+      break;
+    case "discovery_finished":
+      state.discovery.active = false;
+      state.status = ev.stopped_by_user ? "stopped" : "finished";
+      if (ev.catalog_stats) state.discovery.catalog_stats = ev.catalog_stats;
+      renderAll();
+      break;
+    case "round_started":
+      state.discovery.round = ev.round;
+      state.discovery.current_candidates = [];
+      state.discovery.validating = [];
+      state.discovery.scenarios_progress = {};
+      renderPipeline(); renderValidating(); renderFooter();
+      break;
+    case "round_finished":
+      if (ev.stats) state.discovery.stats = ev.stats;
+      if (ev.catalog_stats) state.discovery.catalog_stats = ev.catalog_stats;
+      renderTemplateStats(); renderFooter();
+      break;
+    case "candidate_generated":
+      state.discovery.stats.candidates_generated++;
+      state.discovery.stats.by_origin = state.discovery.stats.by_origin || {};
+      state.discovery.stats.by_origin[ev.origin || "grid"] = (state.discovery.stats.by_origin[ev.origin || "grid"] || 0) + 1;
+      state.discovery.current_candidates.push({
+        id: ev.id, template: ev.template, params: ev.params, risk: ev.risk,
+        label: ev.label, ts: ev.ts, stage: "generated",
+        origin: ev.origin || "grid", parents: ev.parents || [],
+      });
+      if (state.discovery.current_candidates.length > 30) state.discovery.current_candidates.shift();
+      renderPipeline(); renderFooter();
+      break;
+    case "candidate_quick":
+      for (const c of state.discovery.current_candidates) {
+        if (c.id === ev.id) { c.stage = ev.passed_quick ? "quick_passed" : "quick_failed"; c.quick = ev.metric; break; }
+      }
+      if (ev.passed_quick) state.discovery.stats.filtered_in++;
+      else state.discovery.stats.filtered_out++;
+      renderPipeline(); renderFooter();
+      break;
+    case "validation_started":
+      state.discovery.validating.push({
+        id: ev.id, template: ev.template,
+        scenarios_planned: ev.scenarios_planned, scenarios_done: 0, ts: ev.ts,
+      });
+      state.discovery.scenarios_progress[ev.id] = [];
+      renderPipeline(); renderValidating();
+      break;
+    case "scenario_done":
+      for (const v of state.discovery.validating) {
+        if (v.id === ev.id) { v.scenarios_done = (v.scenarios_done||0) + 1; break; }
+      }
+      (state.discovery.scenarios_progress[ev.id] || (state.discovery.scenarios_progress[ev.id] = [])).push(ev.metric || {});
+      renderValidating();
+      break;
+    case "validation_done":
+      state.discovery.validating = state.discovery.validating.filter(v => v.id !== ev.id);
+      delete state.discovery.scenarios_progress[ev.id];
+      state.discovery.recent_decisions.unshift({
+        id: ev.id, approved: !!ev.approved, score: ev.score || 0,
+        summary: ev.summary || {}, rejection_reason: ev.rejection_reason,
+        entry: ev.entry, ts: ev.ts,
+      });
+      if (state.discovery.recent_decisions.length > 30) state.discovery.recent_decisions.length = 30;
+      if (ev.approved) state.discovery.stats.approved++; else state.discovery.stats.rejected++;
+      state.discovery.stats.validated++;
+      for (const c of state.discovery.current_candidates) {
+        if (c.id === ev.id) { c.stage = ev.approved ? "approved" : "rejected"; c.score = ev.score; break; }
+      }
+      renderPipeline(); renderValidating(); renderDecisions(); renderFooter();
+      break;
+    case "candidate_rejected":
+      for (const c of state.discovery.current_candidates) {
+        if (c.id === ev.id) { c.stage = "rejected"; c.reason = ev.reason; break; }
+      }
+      renderPipeline();
+      break;
+    case "catalog_stats":
+      state.discovery.catalog_stats = ev.stats || state.discovery.catalog_stats;
+      renderTemplateStats(); renderFooter();
+      break;
+  }
+}
+
+// ============= WEBSOCKET =================================================
+let ws = null, reconnectTimer = null;
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  $("conn").dataset.state = "connecting";
+  $("connText").textContent = "conectando";
+  ws.onopen = () => { $("conn").dataset.state = "open"; $("connText").textContent = "online"; };
+  ws.onmessage = (m) => { try { applyEvent(JSON.parse(m.data)); } catch(e) { console.error(e); } };
+  ws.onclose = () => {
+    $("conn").dataset.state = "closed"; $("connText").textContent = "offline · reconectando";
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connectWS, 1500);
+  };
+  ws.onerror = () => { try { ws.close(); } catch(e) {} };
+}
+
+// ============= ACTIONS ===================================================
+$("tabs").addEventListener("click", (e) => {
+  if (e.target.matches(".tab")) setMode(e.target.dataset.mode);
+});
+
+$("btnStart").addEventListener("click", async () => {
+  try {
+    if (ui.mode === "discovery") {
+      const body = {
+        assets: $("d-assets").value.trim(),
+        history: $("d-history").value.trim(),
+        candidates_per_round: parseInt($("d-perround").value, 10) || 40,
+        max_rounds: (parseInt($("d-maxrounds").value, 10) || 0) || null,
+        min_winrate: parseFloat($("d-winrate").value),
+        max_drawdown: parseFloat($("d-dd").value),
+        min_profit_factor: parseFloat($("d-pf").value),
+        min_avg_winrate: parseFloat($("d-winrate").value),
+        max_avg_drawdown: parseFloat($("d-dd").value),
+        min_avg_profit_factor: parseFloat($("d-pf").value),
+        min_avg_trades: parseFloat($("d-trades").value),
+        fee_levels: $("d-fees").value.split(",").map(s => parseFloat(s.trim())).filter(v => !isNaN(v)),
+      };
+      const r = await fetch("/discover/start", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
+      if (!r.ok) { const d = await r.json().catch(()=>({})); alert(d.msg || "Falha"); }
+    } else {
+      const body = {
+        assets: $("f-assets").value.trim(),
+        history: $("f-history").value.trim(),
+        workers: parseInt($("f-workers").value, 10),
+        include_extras: $("f-extras").checked,
+        min_winrate: parseFloat($("f-winrate").value),
+        max_drawdown: parseFloat($("f-dd").value),
+        min_profit_factor: parseFloat($("f-pf").value),
+      };
+      const r = await fetch("/start", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
+      if (!r.ok) { const d = await r.json().catch(()=>({})); alert(d.msg || "Falha"); }
+    }
+  } catch (e) { alert("Erro: " + e.message); }
+});
+
+$("btnStop").addEventListener("click", async () => {
+  if (!confirm("Interromper pesquisa?")) return;
+  await fetch("/stop", { method: "POST" });
+});
+
+$("btnAutoscroll").addEventListener("click", () => {
+  ui.autoscroll = !ui.autoscroll;
+  $("btnAutoscroll").classList.toggle("active", ui.autoscroll);
+});
+$("btnClearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
+
+$("btnCatalog").addEventListener("click", async () => {
+  const r = await fetch("/catalog");
+  if (!r.ok) return;
+  const data = await r.json();
+  const stats = data.stats;
+  $("catalogStatsLine").innerHTML = `Total: <b style="color:var(--text)">${stats.total}</b> · Aprovadas: <b style="color:var(--green)">${stats.approved}</b> · Rejeitadas: <b style="color:var(--dim)">${stats.rejected}</b> · Rounds: <b>${stats.rounds}</b>`;
+  const root = $("catalogTable");
+  Array.from(root.querySelectorAll(".row")).forEach(el => el.remove());
+  if (!data.approved.length) {
+    root.insertAdjacentHTML("beforeend", `<div style="grid-column:1/-1;color:var(--dim);text-align:center;padding:40px;letter-spacing:3px">CATALOGO VAZIO</div>`);
+  } else {
+    data.approved.forEach(e => {
+      const s = e.summary || {};
+      root.insertAdjacentHTML("beforeend", `
+        <div class="row">
+          <div class="cell id-cell">${escapeHtml(e.id.substring(0,12))}</div>
+          <div class="cell strat-cell">${escapeHtml(e.template)}<small style="display:block;color:var(--dim);font-size:9px">${escapeHtml(Object.entries(e.params||{}).map(([k,v])=>`${k}=${v}`).join(" "))}</small></div>
+          <div class="cell num-cell" style="color:var(--amber-hi)">${fmt(e.score, 1)}</div>
+          <div class="cell num-cell">${fmt(s.avg_winrate, 1)}</div>
+          <div class="cell num-cell">${fmt(s.avg_profit_factor, 2)}</div>
+          <div class="cell num-cell">${fmt(s.avg_drawdown, 1)}</div>
+          <div class="cell num-cell">${s.scenarios_passed||0}/${s.scenarios_total||0}</div>
+          <div class="cell" style="color:var(--dim);font-size:10px">${escapeHtml((e.approved_at||"").substring(0,16).replace("T"," "))}</div>
+        </div>`);
+    });
+  }
+  $("catalogModal").classList.add("show");
+});
+$("btnActive").addEventListener("click", async () => {
+  const r = await fetch("/active");
+  if (!r.ok) return;
+  const data = await r.json();
+  const list = data.strategies || [];
+  $("catalogStatsLine").innerHTML = `<b style="color:var(--green)">BOT ATIVO</b> · ${list.length} estrategias deployadas em <code style="color:var(--amber)">src/logs/research/active_strategies.json</code>`;
+  const root = $("catalogTable");
+  Array.from(root.querySelectorAll(".row")).forEach(el => el.remove());
+  if (!list.length) {
+    root.insertAdjacentHTML("beforeend", `<div style="grid-column:1/-1;color:var(--dim);text-align:center;padding:40px;letter-spacing:3px">SEM ESTRATEGIAS DEPLOYADAS</div>`);
+  } else {
+    list.forEach(e => {
+      const s = e.summary || {};
+      root.insertAdjacentHTML("beforeend", `
+        <div class="row">
+          <div class="cell id-cell">${escapeHtml(e.id.substring(0,12))}</div>
+          <div class="cell strat-cell">${escapeHtml(e.template)}<small style="display:block;color:var(--dim);font-size:9px">${escapeHtml(Object.entries(e.params||{}).map(([k,v])=>`${k}=${v}`).join(" "))}</small></div>
+          <div class="cell num-cell" style="color:var(--amber-hi)">${fmt(e.score, 1)}</div>
+          <div class="cell num-cell">${fmt(s.avg_winrate, 1)}</div>
+          <div class="cell num-cell">${fmt(s.avg_profit_factor, 2)}</div>
+          <div class="cell num-cell">${fmt(s.avg_drawdown, 1)}</div>
+          <div class="cell num-cell">${s.scenarios_passed||0}/${s.scenarios_total||0}</div>
+          <div class="cell" style="color:var(--dim);font-size:10px">${escapeHtml((e.deployed_at||"").substring(0,16).replace("T"," "))}</div>
+        </div>`);
+    });
+  }
+  $("catalogModal").classList.add("show");
+});
+
+$("closeCatalog").addEventListener("click", () => $("catalogModal").classList.remove("show"));
+$("catalogModal").addEventListener("click", (e) => { if (e.target === $("catalogModal")) $("catalogModal").classList.remove("show"); });
+
+document.querySelectorAll(".chip[data-filter]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".chip[data-filter]").forEach(x => x.classList.remove("active"));
+  b.classList.add("active"); ui.filter = b.dataset.filter; renderRanking();
+}));
+document.querySelectorAll(".chip[data-sort]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".chip[data-sort]").forEach(x => x.classList.remove("active"));
+  b.classList.add("active"); ui.sort = b.dataset.sort; renderRanking();
+}));
+
+// ============= BOOT ======================================================
+setInterval(renderClock, 500);
+setMode("discovery");
+renderAll();
+connectWS();
+</script>
+</body>
+</html>

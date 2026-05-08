@@ -1,0 +1,54 @@
+# HAPPYNATIONBOT — Portfolio Multi-Timeframe
+#
+# Cada ativo declara os TFs que o hub deve manter ao vivo.
+# A `traded_quantity` pode ser deixada como `auto` — o loader resolve via
+# exchangeInfo (lotSize + minNotional) usando `notional_usd` como alvo.
+#
+# Banca paper $1000. Defaults: ~$100/ativo nos top 10.
+
+global:
+  # TFs que serao streamados por padrao quando o ativo nao especificar.
+  # Cobertura completa para todas as estrategias (1m..1d).
+  default_timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+  # Capital alvo por trade em USD (paper: ajustar conforme banca).
+  default_notional_usd: 100.0
+  # Buffer rolling em RAM por (symbol, tf)
+  buffer_size: 1000
+
+assets:
+  - symbol: BTCUSDT
+    notional_usd: 100.0
+    timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+
+  - symbol: ETHUSDT
+    notional_usd: 100.0
+    timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+
+  - symbol: SOLUSDT
+    notional_usd: 100.0
+    timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+
+  - symbol: BNBUSDT
+    notional_usd: 100.0
+    timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+
+  - symbol: XRPUSDT
+    notional_usd: 100.0
+    timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+
+  - symbol: ADAUSDT
+    notional_usd: 100.0
+    timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+
+  - symbol: DOGEUSDT
+    notional_usd: 100.0
+    timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+
+  - symbol: AVAXUSDT
+    notional_usd: 100.0
+    timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+
+  - symbol: LINKUSDT
+    notional_usd: 100.0
+    timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+  # MATICUSDT removido (delisted Binance set/2024 — virou POL)

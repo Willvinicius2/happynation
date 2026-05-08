@@ -1,0 +1,713 @@
+<!doctype html>
+<!--
+  DIREÇÃO B — modernizada.
+  Fundo neutro profundo (não preto puro), accent lima saturado em oklch,
+  pareamento sans (system) + mono (system) para números, densidade alta
+  com mais respiro. Original — não recria UI proprietária.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1200">
+<title>HappyNation · Pesquisa</title>
+<style>
+  :root{
+    --bg:        #0a0a0b;
+    --surface-1: #101012;
+    --surface-2: #16161a;
+    --line:      #1f1f24;
+    --line-2:    #2a2a31;
+    --ink:       #f2f2ee;
+    --ink-2:     #b6b6b0;
+    --ink-3:     #75757a;
+    --ink-4:     #4a4a50;
+
+    --accent:        oklch(0.86 0.19 130);   /* lime-acid */
+    --accent-soft:   oklch(0.86 0.19 130 / 0.12);
+    --accent-line:   oklch(0.86 0.19 130 / 0.35);
+    --warn:          oklch(0.70 0.17 25);    /* warm red, drawdown / cut */
+    --warn-soft:     oklch(0.70 0.17 25 / 0.14);
+
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}
+  body{
+    font: 14px/1.5 var(--sans);
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    min-height:100vh;
+    padding: 24px 40px 80px;
+  }
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;letter-spacing:-0.01em}
+  ::selection{background:var(--accent);color:#0a0a0b}
+
+  button{
+    font: 12px/1 var(--sans);
+    color:var(--ink-2);
+    background:transparent;
+    border:1px solid var(--line-2);
+    padding:7px 12px;
+    cursor:pointer;
+    border-radius: 999px;
+    letter-spacing:0;
+    transition: color .12s, background .12s, border-color .12s;
+  }
+  button:hover{color:var(--ink);border-color:var(--ink-4)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button[aria-pressed="true"]{
+    background:var(--ink);
+    color:#0a0a0b;
+    border-color:var(--ink);
+  }
+
+  .container{max-width:1320px;margin:0 auto}
+
+  /* ===== top bar ===== */
+  header.bar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding-bottom:28px;
+    gap:24px;
+  }
+  .bar .left{display:flex;align-items:center;gap:14px}
+  .bar .mark{
+    width:28px;height:28px;border-radius:8px;
+    background:var(--accent);
+    display:grid;place-items:center;
+    color:#0a0a0b;font-family:var(--mono);font-weight:700;font-size:13px;
+  }
+  .bar .brand{font-weight:600;font-size:14px;letter-spacing:-0.01em}
+  .bar .crumb{color:var(--ink-3);font-size:13px}
+  .bar .crumb b{color:var(--ink-2);font-weight:500}
+  .bar .right{display:flex;align-items:center;gap:14px;color:var(--ink-3);font-size:12px}
+  .bar .pulse{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:5px 10px;border:1px solid var(--line-2);border-radius:999px;
+  }
+  .bar .pulse .d{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+
+  /* ===== run header ===== */
+  .runhead{
+    display:grid;grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr;
+    background:var(--surface-1);
+    border:1px solid var(--line);
+    border-radius:14px;
+    overflow:hidden;
+    margin-bottom:32px;
+  }
+  .runhead .cell{
+    padding:22px 24px;
+    border-left:1px solid var(--line);
+  }
+  .runhead .cell:first-child{border-left:0;background:var(--surface-2)}
+  .runhead .lbl{
+    color:var(--ink-3);font-size:11px;letter-spacing:.04em;
+    text-transform:uppercase;margin-bottom:10px;
+  }
+  .runhead h1{
+    margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-0.02em;
+    color:var(--ink);
+  }
+  .runhead h1 .ts{color:var(--ink-3);font-weight:400;margin-left:8px;font-size:13px;font-family:var(--mono)}
+  .runhead .params{
+    display:flex;flex-wrap:wrap;gap: 6px 14px;
+    color:var(--ink-3);font-size:12px;margin-top:14px;
+  }
+  .runhead .params .p{display:inline-flex;align-items:baseline;gap:6px}
+  .runhead .params .p .k{color:var(--ink-4);text-transform:uppercase;letter-spacing:.06em;font-size:10px}
+  .runhead .params .p .v{color:var(--ink-2);font-family:var(--mono);font-size:12px}
+  .runhead .val{
+    font-family:var(--mono);font-variant-numeric:tabular-nums;
+    font-size:34px;line-height:1;letter-spacing:-0.03em;color:var(--ink);
+    font-weight:500;
+  }
+  .runhead .val .u{color:var(--ink-4);font-size:14px;margin-left:3px}
+  .runhead .val.accent{color:var(--accent)}
+  .runhead .val.dim{color:var(--ink-3)}
+  .runhead .delta{
+    display:inline-flex;align-items:baseline;gap:6px;margin-top:10px;
+    font-size:11px;color:var(--ink-3);
+  }
+  .runhead .delta .bar{
+    flex:1;height:3px;background:var(--line);border-radius:2px;overflow:hidden;
+    min-width:90px;
+  }
+  .runhead .delta .bar i{display:block;height:100%;background:var(--accent)}
+
+  /* ===== layout ===== */
+  main{display:grid;grid-template-columns: minmax(0,1fr) 380px;gap:32px;}
+
+  /* ===== controls ===== */
+  .controls{
+    display:flex;align-items:center;gap:8px;
+    margin-bottom:18px;flex-wrap:wrap;
+  }
+  .controls .sep{
+    width:1px;height:18px;background:var(--line-2);margin:0 6px;
+  }
+  .controls .glbl{
+    color:var(--ink-4);font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-right:4px;
+  }
+  .countpill{
+    margin-left:auto;color:var(--ink-3);font-size:12px;
+  }
+  .countpill b{color:var(--ink);font-family:var(--mono);font-weight:500}
+
+  /* (legacy strategy group styles removed — now rendered as tree) */
+
+  /* ===== tree view ===== */
+  .tree{
+    background:var(--surface-1);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:6px 0;
+    font-family:var(--mono);
+  }
+  .tree .node{
+    display:grid;
+    grid-template-columns: minmax(260px, 1.4fr) repeat(5, minmax(72px, 1fr)) auto;
+    align-items:center;
+    gap:14px;
+    padding:8px 18px;
+    font-size:13px;
+    color:var(--ink-2);
+    border-bottom:1px dashed transparent;
+  }
+  .tree .label{
+    display:flex;align-items:baseline;gap:8px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .tree .guide{
+    color:var(--ink-4);
+    user-select:none;
+    letter-spacing:0;
+  }
+  .tree .v{
+    font-variant-numeric:tabular-nums;
+    text-align:right;color:var(--ink);
+  }
+  .tree .v .u{color:var(--ink-4);font-size:11px;margin-left:1px}
+  .tree .verdict{
+    font-family:var(--sans);
+    font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+    padding:3px 9px;border-radius:999px;
+    border:1px solid var(--line-2);color:var(--ink-3);
+    justify-self:end;
+  }
+
+  /* strategy header row */
+  .tree .strat{
+    grid-template-columns: 1fr auto;
+    padding:14px 18px 8px;
+    color:var(--ink);font-size:13px;font-weight:600;
+    font-family:var(--sans);letter-spacing:-0.01em;
+  }
+  .tree .strat + .leaf{margin-top:0}
+  .tree .strat .meta{
+    color:var(--ink-3);font-weight:400;font-size:12px;
+    font-family:var(--sans);
+  }
+  .tree .strat .meta b{color:var(--ink-2);font-weight:500;font-family:var(--mono)}
+  .tree .strat .pip{
+    display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--ink-4);margin-right:8px;vertical-align:middle;
+  }
+  .tree .strat.has-approved .pip{background:var(--accent)}
+
+  /* leaf rows (assets) */
+  .tree .leaf .asset{
+    color:var(--ink);font-weight:600;
+    font-family:var(--sans);letter-spacing:-0.01em;
+  }
+  .tree .leaf .asset .pair{color:var(--ink-3);font-weight:400}
+  .tree .leaf.approved .asset{color:var(--ink)}
+  .tree .leaf.pruned{opacity:.7}
+  .tree .leaf.pruned .v{color:var(--ink-2)}
+  .tree .leaf.pruned:hover{opacity:1}
+  .tree .leaf:hover{background:var(--surface-2)}
+  .tree .leaf.champion{background:var(--accent-soft)}
+  .tree .leaf.champion:hover{background:var(--accent-soft)}
+  .tree .leaf.champion .score{color:var(--accent);font-weight:600}
+  .tree .leaf.approved .score{color:var(--ink);font-weight:500}
+
+  .tree .v.warn{color:var(--warn)}
+  .tree .v.neg{color:var(--warn)}
+  .tree .leaf.approved .ret{color:var(--accent)}
+
+  .tree .leaf.approved .verdict{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
+
+  .tree .colhead{
+    display:grid;
+    grid-template-columns: minmax(260px, 1.4fr) repeat(5, minmax(72px, 1fr)) auto;
+    gap:14px;
+    padding:10px 18px;
+    color:var(--ink-4);font-size:10px;
+    text-transform:uppercase;letter-spacing:.08em;
+    border-bottom:1px solid var(--line);
+    font-family:var(--sans);
+    margin-bottom:4px;
+  }
+  .tree .colhead span{text-align:right}
+  .tree .colhead span:first-child{text-align:left}
+  .tree .colhead span:last-child{min-width:72px}
+
+  /* ===== sidebar ===== */
+  aside.side{position:sticky;top:24px;align-self:start}
+  .stamp{
+    display:flex;align-items:center;gap:10px;
+    color:var(--ink-3);font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+    margin-bottom:12px;
+  }
+  .stamp::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  .champ{
+    background:linear-gradient(180deg, var(--accent-soft) 0%, transparent 50%), var(--surface-1);
+    border:1px solid var(--accent-line);
+    border-radius:18px;
+    padding:24px;
+    margin-bottom:28px;
+    position:relative;
+    overflow:hidden;
+  }
+  .champ .tag{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:11px;color:var(--accent);
+    background:var(--accent-soft);border:1px solid var(--accent-line);
+    padding:4px 10px;border-radius:999px;letter-spacing:.02em;
+    margin-bottom:18px;
+  }
+  .champ .tag .d{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .champ .name{color:var(--ink-2);font-size:12px;margin-bottom:2px}
+  .champ .pair{color:var(--ink);font-size:24px;font-weight:600;letter-spacing:-0.02em;margin-bottom:24px}
+
+  .champ .heroline{display:flex;align-items:flex-end;gap:14px;margin-bottom:6px}
+  .champ .heroscore{
+    font-family:var(--mono);font-variant-numeric:tabular-nums;
+    font-size:88px;line-height:.85;letter-spacing:-0.06em;
+    color:var(--ink);font-weight:500;
+  }
+  .champ .heroscore.is-accent{color:var(--accent)}
+  .champ .heroscore .of{color:var(--ink-4);font-size:18px;margin-left:2px;letter-spacing:0}
+  .champ .ringWrap{display:flex;align-items:center;justify-content:flex-end;flex:1}
+  .champ .ring{width:64px;height:64px;display:block}
+  .champ .ring .track{stroke:var(--line-2);fill:none;stroke-width:5}
+  .champ .ring .fill{stroke:var(--accent);fill:none;stroke-width:5;stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%}
+  .champ .scorelbl{
+    color:var(--ink-3);font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+    margin-bottom:22px;
+  }
+  .champ .stats{
+    display:grid;grid-template-columns:1fr 1fr;gap:0;
+    border-top:1px solid var(--line);
+  }
+  .champ .stats .s{
+    padding:14px 0;border-bottom:1px solid var(--line);
+  }
+  .champ .stats .s:nth-child(odd){padding-right:16px;border-right:1px solid var(--line)}
+  .champ .stats .s:nth-child(even){padding-left:16px}
+  .champ .stats .s:nth-last-child(-n+2){border-bottom:0}
+  .champ .stats .lbl{color:var(--ink-4);font-size:10px;text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:6px}
+  .champ .stats .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:20px;letter-spacing:-0.02em;color:var(--ink)}
+  .champ .stats .v.accent{color:var(--accent)}
+  .champ .stats .v .u{color:var(--ink-4);font-size:12px;margin-left:1px}
+  .champ .equity{margin-top:18px}
+  .champ .equity svg{width:100%;height:64px;display:block}
+  .champ .equity .area{fill:var(--accent-soft)}
+  .champ .equity .line{fill:none;stroke:var(--accent);stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linecap:round;stroke-linejoin:round}
+
+  .decisions{
+    background:var(--surface-1);border:1px solid var(--line);border-radius:14px;
+    padding:8px 16px;
+  }
+  .decisions ol{list-style:none;margin:0;padding:0}
+  .decisions li{
+    display:grid;grid-template-columns:22px 1fr auto auto;align-items:center;gap:12px;
+    padding:11px 0;border-bottom:1px solid var(--line);
+  }
+  .decisions li:last-child{border-bottom:0}
+  .decisions li .idx{color:var(--ink-4);font-family:var(--mono);font-size:11px}
+  .decisions li .what{
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:13px;color:var(--ink);
+  }
+  .decisions li .what .strat{color:var(--ink-3);font-size:12px;margin-left:6px}
+  .decisions li .scoremini{
+    font-family:var(--mono);font-variant-numeric:tabular-nums;
+    font-size:13px;color:var(--ink);min-width:42px;text-align:right;
+  }
+  .decisions li.no .what{color:var(--ink-2)}
+  .decisions li.no .scoremini{color:var(--ink-3)}
+  .decisions li .verdict{
+    font-size:10px;letter-spacing:.04em;text-transform:uppercase;
+    padding:3px 8px;border-radius:999px;border:1px solid var(--line-2);color:var(--ink-3);
+  }
+  .decisions li.ok .verdict{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
+
+  /* ===== footer ===== */
+  footer.foot{
+    margin-top:48px;
+    color:var(--ink-4);font-size:11px;
+    display:flex;justify-content:space-between;align-items:center;gap:14px;
+  }
+  footer.foot .seg{display:flex;align-items:center;gap:8px}
+
+  @media (max-width:1100px){
+    body{padding:20px 24px 60px}
+    main{grid-template-columns:1fr}
+    aside.side{position:static}
+    .runhead{grid-template-columns:1fr 1fr;}
+    .runhead .cell{border-left:0;border-top:1px solid var(--line)}
+    .runhead .cell:nth-child(-n+2){border-top:0}
+    .runhead .cell:first-child{grid-column:1 / -1}
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header class="bar">
+  <div class="left">
+    <span class="mark">h</span>
+    <span class="brand">HappyNation</span>
+    <span class="crumb">Pesquisa <span style="color:var(--ink-4)">/</span> <b id="runId">Resultado da rodada</b></span>
+  </div>
+  <div class="right">
+    <span class="pulse"><span class="d"></span>Paper · Binance</span>
+    <span>BTC · ETH · SOL · XRP · ADA · JUP</span>
+  </div>
+</header>
+
+<section class="runhead" aria-label="Resumo da rodada">
+  <div class="cell">
+    <div class="lbl">Varredura de backtest</div>
+    <h1>Pesquisa de estratégias <span class="ts" id="hRanAt"></span></h1>
+    <div class="params">
+      <span class="p"><span class="k">duração</span><span class="v" id="hDuration"></span></span>
+      <span class="p"><span class="k">histórico</span><span class="v" id="hHistory"></span></span>
+      <span class="p"><span class="k">janela</span><span class="v" id="hWindow"></span></span>
+      <span class="p"><span class="k">winrate mín.</span><span class="v"><span id="hWR"></span>%</span></span>
+      <span class="p"><span class="k">drawdown máx.</span><span class="v"><span id="hDD"></span>%</span></span>
+    </div>
+  </div>
+  <div class="cell">
+    <div class="lbl">Testadas</div>
+    <div class="val" id="hTested">—</div>
+    <div class="delta"><span>combinações</span></div>
+  </div>
+  <div class="cell">
+    <div class="lbl">Aprovadas</div>
+    <div class="val accent" id="hApproved">—</div>
+    <div class="delta">
+      <div class="bar"><i id="hPassBar"></i></div>
+      <span id="hRate">—</span>
+    </div>
+  </div>
+  <div class="cell">
+    <div class="lbl">Podadas</div>
+    <div class="val dim" id="hPruned">—</div>
+    <div class="delta"><span>reprovadas</span></div>
+  </div>
+  <div class="cell">
+    <div class="lbl">Maior score</div>
+    <div class="val accent" id="hTop">—</div>
+    <div class="delta"><span id="hTopWho">—</span></div>
+  </div>
+</section>
+
+<main>
+  <section class="results" aria-label="Resultados">
+    <div class="controls" role="toolbar" aria-label="Filtros e ordenação">
+      <span class="glbl">Mostrar</span>
+      <button data-filter="all" aria-pressed="true">Todas</button>
+      <button data-filter="approved" aria-pressed="false">Aprovadas</button>
+      <button data-filter="pruned" aria-pressed="false">Podadas</button>
+      <span class="sep"></span>
+      <span class="glbl">Ordenar</span>
+      <button data-sort="score" aria-pressed="true">Score</button>
+      <button data-sort="winrate" aria-pressed="false">Winrate</button>
+      <button data-sort="drawdown" aria-pressed="false">Drawdown</button>
+      <span class="countpill"><b id="cShown">0</b> de <span id="cTotal">0</span></span>
+    </div>
+    <div id="groups"></div>
+  </section>
+
+  <aside class="side" aria-label="Campeã e decisões">
+    <div class="stamp">Campeã</div>
+    <div id="champ"></div>
+
+    <div class="stamp">Principais decisões · <span id="decCount" style="color:var(--ink-2);font-family:var(--mono)">0</span></div>
+    <div class="decisions">
+      <ol id="decisions"></ol>
+    </div>
+  </aside>
+</main>
+
+<footer class="foot">
+  <span class="seg">console de pesquisa · v0.4 · só paper</span>
+  <span class="seg">arquivo: research_run.json</span>
+</footer>
+
+</div>
+
+<script>
+/* =========================================================
+   MOCK DATA
+   ========================================================= */
+const DATA = {
+  ran_at: "2026-04-27 14:32",
+  duration_min: 47,
+  totals: { tested: 184, approved: 23, pruned: 161 },
+  params: { history: "8 months", window_days: 60, min_winrate: 50, max_drawdown: 25 },
+  results: [
+    { strategy:"ChampionsStrategy", asset:"BTCUSDT", passed:true,  score:78.4, consistency_score:71.2, winrate_pct:58.3, profit_factor:1.62, max_drawdown_pct:12.4, max_loss_streak:3, trades:47, total_return_pct:34.8,
+      equity_curve:[1000,1020,1015,1080,1110,1095,1180,1240,1348] },
+    { strategy:"ChampionsStrategy", asset:"ETHUSDT", passed:true,  score:71.0, consistency_score:66.1, winrate_pct:55.4, profit_factor:1.41, max_drawdown_pct:14.9, max_loss_streak:4, trades:52, total_return_pct:21.7,
+      equity_curve:[1000,990,1010,1040,1030,1080,1110,1090,1217] },
+    { strategy:"ChampionsStrategy", asset:"SOLUSDT", passed:false, score:38.2, consistency_score:31.0, winrate_pct:46.0, profit_factor:0.94, max_drawdown_pct:31.2, max_loss_streak:7, trades:41, total_return_pct:-8.4,
+      equity_curve:[1000,1040,990,950,920,1010,890,860,916] },
+
+    { strategy:"MeanReversionV2", asset:"BTCUSDT", passed:true,  score:74.6, consistency_score:69.8, winrate_pct:61.0, profit_factor:1.55, max_drawdown_pct:9.8, max_loss_streak:2, trades:63, total_return_pct:28.1,
+      equity_curve:[1000,1010,1004,1030,1055,1048,1090,1130,1281] },
+    { strategy:"MeanReversionV2", asset:"ADAUSDT", passed:true,  score:64.3, consistency_score:60.0, winrate_pct:54.1, profit_factor:1.28, max_drawdown_pct:17.5, max_loss_streak:5, trades:38, total_return_pct:14.9,
+      equity_curve:[1000,990,1010,1000,1040,1020,1060,1080,1149] },
+    { strategy:"MeanReversionV2", asset:"JUPUSDT", passed:false, score:42.1, consistency_score:36.4, winrate_pct:48.7, profit_factor:1.02, max_drawdown_pct:26.4, max_loss_streak:6, trades:29, total_return_pct:1.2,
+      equity_curve:[1000,1030,980,940,1010,970,1010,990,1012] },
+
+    { strategy:"BreakoutAlpha", asset:"SOLUSDT", passed:true,  score:69.7, consistency_score:64.2, winrate_pct:52.8, profit_factor:1.74, max_drawdown_pct:18.1, max_loss_streak:4, trades:31, total_return_pct:39.3,
+      equity_curve:[1000,1050,1020,1100,1080,1180,1140,1280,1393] },
+    { strategy:"BreakoutAlpha", asset:"XRPUSDT", passed:false, score:45.8, consistency_score:39.7, winrate_pct:49.1, profit_factor:1.05, max_drawdown_pct:22.9, max_loss_streak:5, trades:27, total_return_pct:3.7,
+      equity_curve:[1000,1040,990,960,1010,980,1020,1000,1037] },
+
+    { strategy:"TrendFollowerX", asset:"BTCUSDT", passed:true,  score:66.9, consistency_score:62.5, winrate_pct:53.7, profit_factor:1.38, max_drawdown_pct:13.8, max_loss_streak:3, trades:44, total_return_pct:19.2,
+      equity_curve:[1000,1010,1000,1040,1030,1070,1060,1120,1192] },
+    { strategy:"TrendFollowerX", asset:"ETHUSDT", passed:false, score:34.4, consistency_score:28.9, winrate_pct:44.2, profit_factor:0.88, max_drawdown_pct:33.6, max_loss_streak:8, trades:39, total_return_pct:-12.7,
+      equity_curve:[1000,1030,970,940,890,920,860,830,873] },
+
+    { strategy:"RangeScalperLite", asset:"ADAUSDT", passed:true,  score:60.5, consistency_score:57.0, winrate_pct:62.1, profit_factor:1.22, max_drawdown_pct:8.4, max_loss_streak:2, trades:91, total_return_pct:11.8,
+      equity_curve:[1000,1008,1004,1020,1018,1040,1036,1070,1118] },
+    { strategy:"RangeScalperLite", asset:"JUPUSDT", passed:false, score:29.8, consistency_score:24.2, winrate_pct:41.0, profit_factor:0.79, max_drawdown_pct:38.4, max_loss_streak:9, trades:54, total_return_pct:-19.1,
+      equity_curve:[1000,1010,950,910,880,830,790,800,809] },
+  ]
+};
+
+/* =========================================================
+   HELPERS
+   ========================================================= */
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+const fmt = {
+  n1:(x)=>x.toFixed(1),
+  n2:(x)=>x.toFixed(2),
+  pct:(x)=>x.toFixed(1),
+  signed:(x)=>(x>=0?"+":"")+x.toFixed(1),
+};
+const state = { filter:"all", sort:"score" };
+
+function pricePathPaths(curve, w, h, pad=2){
+  const min = Math.min(...curve), max = Math.max(...curve);
+  const span = (max-min) || 1;
+  const sx = (i)=> pad + (i/(curve.length-1))*(w-2*pad);
+  const sy = (v)=> pad + (1 - (v-min)/span) * (h-2*pad);
+  let line = "";
+  curve.forEach((v,i)=> line += (i?"L":"M")+sx(i).toFixed(2)+" "+sy(v).toFixed(2));
+  let area = `M${sx(0).toFixed(2)} ${(h-pad).toFixed(2)} `;
+  curve.forEach((v,i)=> area += `L${sx(i).toFixed(2)} ${sy(v).toFixed(2)} `);
+  area += `L${sx(curve.length-1).toFixed(2)} ${(h-pad).toFixed(2)} Z`;
+  return { line, area };
+}
+
+/* =========================================================
+   HEADER
+   ========================================================= */
+function renderHeader(){
+  const t = DATA.totals;
+  $("#hRanAt").textContent = "· "+DATA.ran_at;
+  $("#hDuration").textContent = DATA.duration_min + " min";
+  $("#hHistory").textContent = DATA.params.history;
+  $("#hWindow").textContent = DATA.params.window_days + "d";
+  $("#hWR").textContent = DATA.params.min_winrate;
+  $("#hDD").textContent = DATA.params.max_drawdown;
+  $("#hTested").textContent = t.tested;
+  $("#hApproved").textContent = t.approved;
+  $("#hPruned").textContent = t.pruned;
+  const rate = (t.approved/t.tested*100);
+  $("#hRate").innerHTML = rate.toFixed(1).replace('.',',')+'% aprovadas';
+  $("#hPassBar").style.width = rate.toFixed(1)+"%";
+  const top = DATA.results.slice().sort((a,b)=>b.score-a.score)[0];
+  $("#hTop").innerHTML = fmt.n1(top.score);
+  $("#hTopWho").textContent = top.strategy + " · " + top.asset;
+  $("#runId").textContent = "Rodada · " + DATA.ran_at;
+}
+
+/* =========================================================
+   GROUPS
+   ========================================================= */
+function getFiltered(){
+  let rs = DATA.results.slice();
+  if (state.filter==="approved") rs = rs.filter(r=>r.passed);
+  else if (state.filter==="pruned") rs = rs.filter(r=>!r.passed);
+  const sorters = {
+    score:(a,b)=> b.score - a.score,
+    winrate:(a,b)=> b.winrate_pct - a.winrate_pct,
+    drawdown:(a,b)=> a.max_drawdown_pct - b.max_drawdown_pct,
+  };
+  rs.sort(sorters[state.sort]);
+  return rs;
+}
+
+function renderGroups(){
+  const rs = getFiltered();
+  const groups = new Map();
+  for (const r of rs){
+    if (!groups.has(r.strategy)) groups.set(r.strategy, []);
+    groups.get(r.strategy).push(r);
+  }
+  const orderedGroups = Array.from(groups.entries())
+    .sort((a,b)=> Math.max(...b[1].map(r=>r.score)) - Math.max(...a[1].map(r=>r.score)));
+
+  const championKey = (() => {
+    const top = DATA.results.slice().sort((a,b)=>b.score-a.score)[0];
+    return top ? top.strategy + "|" + top.asset : null;
+  })();
+
+  const root = $("#groups");
+  root.innerHTML = "";
+
+  const tree = document.createElement("div");
+  tree.className = "tree";
+  tree.innerHTML = `
+    <div class="colhead">
+      <span>Estratégia / Ativo</span>
+      <span>Score</span>
+      <span>Winrate</span>
+      <span>Profit f.</span>
+      <span>DD máx.</span>
+      <span>Retorno</span>
+      <span>Status</span>
+    </div>`;
+
+  for (const [strat, items] of orderedGroups){
+    const okCount = items.filter(i=>i.passed).length;
+    const stratEl = document.createElement("div");
+    stratEl.className = "node strat" + (okCount>0?" has-approved":"");
+    stratEl.innerHTML = `
+      <div><span class="pip"></span>${strat}</div>
+      <span class="meta">${items.length} ${items.length===1?"ativo":"ativos"} · <b>${okCount}</b> aprovadas · <b>${items.length-okCount}</b> podadas</span>`;
+    tree.appendChild(stratEl);
+
+    items.forEach((r, idx) => {
+      const isLast = idx === items.length - 1;
+      const guide = isLast ? "└─" : "├─";
+      const key = r.strategy + "|" + r.asset;
+      const isChamp = key === championKey;
+      const ddClass = r.max_drawdown_pct > DATA.params.max_drawdown ? "warn" : "";
+      const retClass = r.total_return_pct < 0 ? "neg" : "";
+      const base = r.asset.replace("USDT","");
+
+      const leaf = document.createElement("div");
+      leaf.className = "node leaf " + (r.passed?"approved":"pruned") + (isChamp?" champion":"");
+      leaf.innerHTML = `
+        <div class="label"><span class="guide">${guide}</span><span class="asset">${base}<span class="pair">/USDT</span></span></div>
+        <span class="v score">${fmt.n1(r.score)}</span>
+        <span class="v">${fmt.pct(r.winrate_pct)}<span class="u">%</span></span>
+        <span class="v">${fmt.n2(r.profit_factor)}</span>
+        <span class="v ${ddClass}">${fmt.pct(r.max_drawdown_pct)}<span class="u">%</span></span>
+        <span class="v ret ${retClass}">${fmt.signed(r.total_return_pct)}<span class="u">%</span></span>
+        <span class="verdict">${r.passed?'manter':'cortar'}</span>`;
+      tree.appendChild(leaf);
+    });
+  }
+  root.appendChild(tree);
+
+  $("#cShown").textContent = rs.length;
+  $("#cTotal").textContent = DATA.results.length;
+}
+
+/* =========================================================
+   SIDEBAR
+   ========================================================= */
+function renderSidebar(){
+  const top = DATA.results.slice().sort((a,b)=>b.score-a.score)[0];
+  const sp = pricePathPaths(top.equity_curve, 320, 64, 1);
+  const base = top.asset.replace("USDT","");
+
+  // ring
+  const r = 27, c = 2*Math.PI*r;
+  const pct = top.score/100;
+  const dash = (pct*c).toFixed(2) + " " + (c).toFixed(2);
+
+  $("#champ").innerHTML = `
+    <div class="champ">
+      <span class="tag"><span class="d"></span>Campeã · nº1</span>
+      <div class="name">${top.strategy}</div>
+      <div class="pair">${base} <span style="color:var(--ink-3);font-weight:400">/USDT</span></div>
+
+      <div class="heroline">
+        <div class="heroscore is-accent">${fmt.n1(top.score)}<span class="of"> /100</span></div>
+        <div class="ringWrap">
+          <svg class="ring" viewBox="0 0 64 64" aria-hidden="true">
+            <circle class="track" cx="32" cy="32" r="${r}"/>
+            <circle class="fill"  cx="32" cy="32" r="${r}" stroke-dasharray="${dash}"/>
+          </svg>
+        </div>
+      </div>
+      <div class="scorelbl">Score composto · consistência ${fmt.n1(top.consistency_score)}</div>
+
+      <div class="stats">
+        <div class="s"><span class="lbl">Winrate</span><span class="v accent">${fmt.pct(top.winrate_pct)}<span class="u">%</span></span></div>
+        <div class="s"><span class="lbl">Profit factor</span><span class="v">${fmt.n2(top.profit_factor)}</span></div>
+        <div class="s"><span class="lbl">Drawdown máx.</span><span class="v">${fmt.pct(top.max_drawdown_pct)}<span class="u">%</span></span></div>
+        <div class="s"><span class="lbl">Sequência perd.</span><span class="v">${top.max_loss_streak}</span></div>
+        <div class="s"><span class="lbl">Trades</span><span class="v">${top.trades}</span></div>
+        <div class="s"><span class="lbl">Retorno total</span><span class="v accent">${fmt.signed(top.total_return_pct)}<span class="u">%</span></span></div>
+      </div>
+
+      <div class="equity" aria-label="Curva de equity">
+        <svg viewBox="0 0 320 64" preserveAspectRatio="none">
+          <path class="area" d="${sp.area}"/>
+          <path class="line" d="${sp.line}"/>
+        </svg>
+      </div>
+    </div>`;
+
+  const decs = DATA.results.slice().sort((a,b)=>b.score-a.score).slice(0,12);
+  $("#decisions").innerHTML = decs.map((r,i)=>{
+    const baseAsset = r.asset.replace("USDT","");
+    return `<li class="${r.passed?'ok':'no'}">
+      <span class="idx">${String(i+1).padStart(2,"0")}</span>
+      <span class="what">${baseAsset}<span class="strat">${r.strategy}</span></span>
+      <span class="scoremini">${fmt.n1(r.score)}</span>
+      <span class="verdict">${r.passed?"manter":"cortar"}</span>
+    </li>`;
+  }).join("");
+  $("#decCount").textContent = decs.length;
+}
+
+/* =========================================================
+   CONTROLS
+   ========================================================= */
+function bindControls(){
+  $$("[data-filter]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      state.filter = b.dataset.filter;
+      $$("[data-filter]").forEach(x=>x.setAttribute("aria-pressed", x===b ? "true":"false"));
+      renderGroups();
+    });
+  });
+  $$("[data-sort]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      state.sort = b.dataset.sort;
+      $$("[data-sort]").forEach(x=>x.setAttribute("aria-pressed", x===b ? "true":"false"));
+      renderGroups();
+    });
+  });
+}
+
+renderHeader();
+renderGroups();
+renderSidebar();
+bindControls();
+</script>
+</body>
+</html>

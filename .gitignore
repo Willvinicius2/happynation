@@ -2,8 +2,11 @@ src/logs/**
 !src/logs/
 !src/logs/**/
 !src/logs/**/.gitkeep
+logs/
 *.parquet
 *.sqlite3
+src/database/trailing_db.json
+src/database/*.lock
 
 
 
