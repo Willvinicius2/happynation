@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aether / RAIO</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260506-actionmap">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark"></div>
+        <div>
+          <h1>Aether<span>/RAIO</span></h1>
+          <p>Busca autonoma de estrategias / compute maximo</p>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="treeViewBtn" style="display:none;">Arvore</button>
+        <button id="mindmapViewBtn" class="active">Mapa Mental</button>
+        <button id="rankingViewBtn">Ranking</button>
+        <button id="seedBtn">Seed</button>
+        <button id="importBtn">Importar legado</button>
+        <button id="llmResearchBtn">Agente LLM</button>
+        <button id="webResearchBtn">Pesquisa web</button>
+        <button id="cycleBtn">1 ciclo</button>
+        <button id="continuousBtn" class="primary">Continuo</button>
+        <button id="stopBtn">Parar</button>
+        <button id="manifestBtn">Manifest</button>
+      </div>
+      <div class="runtime">
+        <span id="runState">standby</span>
+        <strong id="workerCount">0</strong><small> workers</small>
+      </div>
+    </header>
+
+    <section class="healthBar" id="healthBar" aria-label="Saude da exploracao">
+      <div class="healthCell" id="healthVerdict">
+        <span class="hLabel">Estado</span>
+        <strong class="hValue" id="hVerdict">--</strong>
+        <small class="hHint" id="hVerdictHint">aguardando dados</small>
+      </div>
+      <div class="healthCell">
+        <span class="hLabel">Idade do recorde</span>
+        <strong class="hValue" id="hBestAge">--</strong>
+        <small class="hHint" id="hBestAgeHint">desde o ultimo melhor score</small>
+      </div>
+      <div class="healthCell">
+        <span class="hLabel">Diversidade (entropia)</span>
+        <strong class="hValue" id="hDiversity">--</strong>
+        <div class="hBar"><div class="hBarFill" id="hDiversityFill"></div></div>
+        <small class="hHint" id="hDiversityHint">0 = monocultura / 1 = espalhado</small>
+      </div>
+      <div class="healthCell">
+        <span class="hLabel">Familia dominante</span>
+        <strong class="hValue" id="hDominant">--</strong>
+        <small class="hHint" id="hDominantHint">% das hipoteses ativas</small>
+      </div>
+      <div class="healthCell wide">
+        <span class="hLabel">Distribuicao</span>
+        <div class="familyStack" id="hFamilyStack"></div>
+      </div>
+      <div class="healthCell">
+        <span class="hLabel">Largura / Profundidade</span>
+        <strong class="hValue" id="hShape">--</strong>
+        <small class="hHint" id="hShapeHint">--</small>
+      </div>
+      <div class="healthCell">
+        <span class="hLabel">Critic</span>
+        <strong class="hValue" id="hCritic">--</strong>
+        <small class="hHint" id="hCriticHint">aprovadas vs rejeitadas no out-of-sample</small>
+      </div>
+      <div class="healthCell">
+        <span class="hLabel">Hyper Agent</span>
+        <strong class="hValue" id="hHyper">--</strong>
+        <small class="hHint" id="hHyperHint">cadencia automatica de exploracao</small>
+      </div>
+      <div class="healthCell wide">
+        <span class="hLabel">Top motivos de poda</span>
+        <div class="pruneReasons" id="hPruneReasons"></div>
+      </div>
+    </section>
+
+    <main class="canvas">
+      <svg id="tree" class="hidden" viewBox="0 0 1400 820" preserveAspectRatio="xMidYMid meet" style="display:none;">
+        <g id="viewport">
+          <g id="edges"></g>
+          <g id="nodes"></g>
+        </g>
+      </svg>
+      <div class="navtools hidden" style="display:none;">
+        <button id="zoomOutBtn">-</button>
+        <span id="zoomLabel">100%</span>
+        <button id="zoomInBtn">+</button>
+        <button id="fitBtn">Fit</button>
+        <button id="compactBtn">Agrupar</button>
+        <label class="navToggle">
+          <input type="checkbox" id="showPrunedToggle">
+          <span>Mostrar podados</span>
+        </label>
+      </div>
+      <div class="legend hidden" style="display:none;">
+        <span><b class="dot candidate"></b>candidate</span>
+        <span><b class="dot promising"></b>promising</span>
+        <span><b class="dot expand"></b>expand</span>
+        <span><b class="dot validated"></b>validated</span>
+        <span><b class="dot pruned"></b>pruned</span>
+        <span><b class="dot standby"></b>standby</span>
+      </div>
+      <section id="rankingView" class="rankingView hidden">
+        <div class="rankingHead">
+          <div>
+            <div class="eyebrow">Ranking paper</div>
+            <h2>Estrategias prontas para teste</h2>
+            <p id="rankingSummary">Candidatas ordenadas por prontidao, score e PnL simulado.</p>
+          </div>
+          <label>
+            Campanha
+            <select id="rankingCampaign">
+              <option value="active">Atual</option>
+              <option value="legacy_pre_aether">Antes / legado</option>
+              <option value="all">Tudo</option>
+            </select>
+          </label>
+          <label>
+            Capital base
+            <input id="capitalInput" type="number" min="1" step="100" value="1000">
+          </label>
+          <button id="newCampaignBtn">Nova campanha</button>
+          <button id="refreshRankingBtn">Atualizar</button>
+          <button id="deployRankingBtn" class="primary">Ativar no bot</button>
+          <span id="deployRankingStatus" class="deployStatus"></span>
+        </div>
+        <div id="rankingList" class="rankingList"></div>
+      </section>
+
+      <section id="mindmapView" class="mindmapView hidden">
+        <div id="mermaidContainer" style="display:none;"></div>
+        <div id="agentsGraphContainer"></div>
+        <div id="agentsGraphFocus" class="graphFocus"></div>
+        <div class="graphHud">
+          <span id="agentsGraphStats">--</span> · arraste pra mover · scroll pra zoom · clique pra fixar
+        </div>
+      </section>
+    </main>
+
+    <aside class="panel">
+      <section class="selected">
+        <div class="eyebrow">No selecionado</div>
+        <h2 id="nodeName">Nenhum</h2>
+        <p id="nodeHypothesis">Nenhum no selecionado.</p>
+        <div class="score">
+          <span>Score</span>
+          <strong id="nodeScore">0.00</strong>
+        </div>
+        <div class="metaGrid" id="nodeMeta"></div>
+      </section>
+
+      <section>
+        <div class="eyebrow">Agentes</div>
+        <div id="agents" class="agents"></div>
+      </section>
+
+      <section class="llmTraceWrap">
+        <div class="eyebrow">Traces Claude</div>
+        <div id="llmTraces" class="llmTraces"></div>
+      </section>
+
+      <section class="runs">
+        <div class="eyebrow">Runs</div>
+        <div id="runs"></div>
+      </section>
+
+      <section class="logWrap">
+        <div class="eyebrow">Registro</div>
+        <div id="log" class="log"></div>
+      </section>
+    </aside>
+
+    <section class="activeBar" aria-label="Agentes atuando agora">
+      <div class="activeBarHeader">
+        <span class="eyebrow">Atuando agora</span>
+        <span id="activeBarCount" class="activeBarCount">0</span>
+      </div>
+      <div id="activeAgents" class="activeAgents"></div>
+    </section>
+
+    <footer class="stats">
+      <div><span>Nos</span><strong id="statNodes">0</strong></div>
+      <div><span>Podados</span><strong id="statPruned">0</strong></div>
+      <div><span>Validados</span><strong id="statValidated">0</strong></div>
+      <div><span>Tarefas</span><strong id="statTasks">0</strong></div>
+      <div><span>DB</span><strong id="statDb">runtime</strong></div>
+    </footer>
+  </div>
+
+  <script src="/static/app.js?v=20260506-actionmap"></script>
+</body>
+</html>
