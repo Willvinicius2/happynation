@@ -875,28 +875,79 @@ class BinanceTraderBot:
         """Aplica tier de risco/posicao do snapshot atual antes da compra.
 
         Atualiza self.stop_loss_usd, trail_activation_usd, trail_floor_usd e
-        retorna o cap de notional (override_max_usd) que deve ser passado pro
-        plan_paper_buy. Retorna None se nao houver tier_config no snapshot.
+        guarda em self._tier_*_pct os ratios (SL/posicao, trail_act/posicao,
+        trail_floor/posicao) para que `_rescale_protection_to_actual_notional`
+        possa reescalonar quando `plan_paper_buy` reduzir o notional.
+
+        Retorna o cap de notional (override_max_usd) pro plan_paper_buy, ou
+        None se nao houver tier_config no snapshot.
         """
         snap = getattr(self, "last_strategy_snapshot", None) or {}
         tier_cfg = snap.get("tier_config")
         if not isinstance(tier_cfg, dict):
+            # Fallback: nao temos ratios do tier. _rescale nao reescalona.
+            self._tier_sl_pct = None
+            self._tier_trail_act_pct = None
+            self._tier_trail_floor_pct = None
+            logging.info(
+                f"[TIER FALLBACK] {self.operation_code}: sem tier_config no snapshot. "
+                f"usando STOP_LOSS_USD=${self.stop_loss_usd:.2f}, "
+                f"trail_act=${self.trail_activation_usd:.2f}, "
+                f"floor=${self.trail_floor_usd:.2f} (config estatica)."
+            )
             return None
         try:
-            self.stop_loss_usd = float(tier_cfg.get("sl_usd") or self.stop_loss_usd)
-            self.trail_activation_usd = float(tier_cfg.get("trail_activation_usd") or self.trail_activation_usd)
-            self.trail_floor_usd = float(tier_cfg.get("trail_floor_usd") or self.trail_floor_usd)
+            position_usd = float(tier_cfg.get("position_usd") or 0.0)
+            sl_usd_tier = float(tier_cfg.get("sl_usd") or self.stop_loss_usd)
+            trail_act_tier = float(tier_cfg.get("trail_activation_usd") or self.trail_activation_usd)
+            trail_floor_tier = float(tier_cfg.get("trail_floor_usd") or self.trail_floor_usd)
+            if position_usd > 0:
+                self._tier_sl_pct = sl_usd_tier / position_usd
+                self._tier_trail_act_pct = trail_act_tier / position_usd
+                self._tier_trail_floor_pct = trail_floor_tier / position_usd
+            else:
+                self._tier_sl_pct = None
+                self._tier_trail_act_pct = None
+                self._tier_trail_floor_pct = None
+            self.stop_loss_usd = sl_usd_tier
+            self.trail_activation_usd = trail_act_tier
+            self.trail_floor_usd = trail_floor_tier
             self.trail_giveback_pct = float(tier_cfg.get("trail_giveback_pct") or self.trail_giveback_pct)
             tier = tier_cfg.get("tier")
-            position_usd = tier_cfg.get("position_usd")
-            msg = (f"[TIER {tier}] posicao=${position_usd:.0f} | SL=${self.stop_loss_usd:.0f} | "
-                   f"trail_act=+${self.trail_activation_usd:.0f} | floor=+${self.trail_floor_usd:.0f}")
+            msg = (f"[TIER {tier}] posicao=${position_usd:.0f} | SL=${self.stop_loss_usd:.2f} | "
+                   f"trail_act=+${self.trail_activation_usd:.2f} | floor=+${self.trail_floor_usd:.2f}")
             print(msg, flush=True)
             logging.info(msg)
-            return float(position_usd) if position_usd else None
+            return position_usd if position_usd > 0 else None
         except Exception as exc:
             logging.warning(f"_apply_tier_before_buy falhou em {self.operation_code}: {exc}")
             return None
+
+    def _rescale_protection_to_actual_notional(self, actual_notional: float) -> None:
+        """Reescalona SL/trail USD pro notional efetivamente aprovado.
+
+        plan_paper_buy pode reduzir a quantidade por caixa, exposicao ou
+        reserva. Sem rescale, SL absoluto vira % maior do que o tier
+        calibrou (ex: tier 1 com SL=$2 calibrado pra posicao $100 vira -8%
+        se a posicao final for $25). Aqui mantemos o ratio SL/posicao.
+
+        Sem ratio do tier (fallback do main), nao reescalona.
+        """
+        sl_pct = getattr(self, "_tier_sl_pct", None)
+        if sl_pct is None or actual_notional <= 0:
+            return
+        new_sl = actual_notional * sl_pct
+        new_act = actual_notional * (getattr(self, "_tier_trail_act_pct", None) or 0.0)
+        new_floor = actual_notional * (getattr(self, "_tier_trail_floor_pct", None) or 0.0)
+        if abs(new_sl - self.stop_loss_usd) > 0.01:
+            msg = (f"[TIER RESCALE] {self.operation_code} notional ${actual_notional:.2f}: "
+                   f"SL ${self.stop_loss_usd:.2f} -> ${new_sl:.2f} | "
+                   f"trail_act ${self.trail_activation_usd:.2f} -> ${new_act:.2f} | "
+                   f"floor ${self.trail_floor_usd:.2f} -> ${new_floor:.2f}")
+            logging.info(msg)
+        self.stop_loss_usd = new_sl
+        self.trail_activation_usd = new_act
+        self.trail_floor_usd = new_floor
 
     # Compra a ação a MERCADO
     def buyMarketOrder(self, quantity=None):
@@ -917,6 +968,7 @@ class BinanceTraderBot:
                 logging.warning(msg)
                 return False
             qty = planned_qty
+            self._rescale_protection_to_actual_notional(float(price) * float(qty))
             self.paper_last_buy_price = price
             self.last_stock_account_balance = float(qty)
             self.actual_trade_position = True
@@ -1017,6 +1069,7 @@ class BinanceTraderBot:
                 logging.warning(msg)
                 return False
             qty = planned_qty
+            self._rescale_protection_to_actual_notional(float(current_price) * float(qty))
             self.paper_last_buy_price = current_price
             self.last_stock_account_balance = float(qty)
             self.actual_trade_position = True
@@ -1570,10 +1623,20 @@ class BinanceTraderBot:
         # ---- SL em USD (prioritario quando configurado) ----
         if self.stop_loss_usd > 0 and self.actual_trade_position and self.last_buy_price > 0:
             qty = float(self.last_stock_account_balance or 0.0)
+            notional = qty * float(close_price)
             pnl_usd = qty * (float(close_price) - float(self.last_buy_price))
-            stop_threshold = -float(self.stop_loss_usd)
+            # Buffer pra perda real nao estourar o limite por causa do slippage
+            # de saida e da fee de venda. Default 0.25% do notional.
+            try:
+                slip_buffer_pct = float(os.getenv("SL_USD_SLIP_BUFFER_PCT", 0.25))
+            except (TypeError, ValueError):
+                slip_buffer_pct = 0.25
+            slip_buffer_usd = notional * (slip_buffer_pct / 100.0)
+            effective_limit_usd = max(0.0, float(self.stop_loss_usd) - slip_buffer_usd)
+            stop_threshold = -effective_limit_usd
             print(f'\n - Preço atual: {close_price}')
-            print(f" - PnL USD: ${pnl_usd:+.2f} | SL USD: ${stop_threshold:.2f}")
+            print(f" - PnL USD: ${pnl_usd:+.2f} | SL USD: ${stop_threshold:.2f} "
+                  f"(limite ${self.stop_loss_usd:.2f} - buffer ${slip_buffer_usd:.2f})")
             if pnl_usd <= stop_threshold:
                 print(f"🔴 Ativando STOP LOSS USD (${pnl_usd:+.2f} <= ${stop_threshold:.2f})...", flush=True)
                 notificar_stop_loss(self.operation_code, self.last_stock_account_balance, float(close_price), self.last_buy_price)
@@ -1727,12 +1790,35 @@ class BinanceTraderBot:
                       f"(atual peak ${self.peak_pnl_usd:+.2f}, pnl ${pnl_usd:+.2f})")
                 return False
 
-            # Floor dinamico = max(floor_minimo, peak * (1 - giveback%))
-            give = self.trail_giveback_pct / 100.0
-            dynamic_floor = max(self.trail_floor_usd, self.peak_pnl_usd * (1.0 - give))
-
+            # Giveback adaptativo: vol baixa (BTC) usa giveback menor, vol alta
+            # (DOGE/SOL) usa maior. ATR_TRAIL_GIVEBACK_K (default 5.0) escala
+            # ATR% -> giveback%. Clamp em [TRAIL_GIVEBACK_MIN, TRAIL_GIVEBACK_MAX].
+            # Ex: ATR=2% e k=5 -> 10% giveback. Sem ATR cai no fixo do tier.
+            try:
+                k = float(os.getenv("ATR_TRAIL_GIVEBACK_K", 5.0))
+                gmin = float(os.getenv("TRAIL_GIVEBACK_MIN_PCT", 15.0))
+                gmax = float(os.getenv("TRAIL_GIVEBACK_MAX_PCT", 40.0))
+            except (TypeError, ValueError):
+                k, gmin, gmax = 5.0, 15.0, 40.0
+            atr_pct = self._atr_pct(period=14)
+            if atr_pct is not None and atr_pct > 0:
+                effective_giveback_pct = max(min(atr_pct * k, gmax), gmin)
+            else:
+                effective_giveback_pct = self.trail_giveback_pct
+            give = effective_giveback_pct / 100.0
+            giveback_floor = self.peak_pnl_usd * (1.0 - give)
+            # Ladder de protecao escalonada: piso minimo cresce com peak%.
+            # Combina com giveback via max(): sempre vence o piso mais protetor.
+            try:
+                from src.modules.StrategyTiers import compute_ladder_floor_usd
+                notional = float(entry) * float(qty)
+                ladder_floor_usd, ladder_locked_pct = compute_ladder_floor_usd(self.peak_pnl_usd, notional)
+            except Exception:
+                ladder_floor_usd, ladder_locked_pct = 0.0, 0.0
+            dynamic_floor = max(self.trail_floor_usd, giveback_floor, ladder_floor_usd)
+            ladder_msg = f" | ladder {ladder_locked_pct:.0f}% (${ladder_floor_usd:+.2f})" if ladder_locked_pct > 0 else ""
             print(f" - [TRAIL$] peak ${self.peak_pnl_usd:+.2f} | pnl ${pnl_usd:+.2f} | "
-                  f"floor ${dynamic_floor:+.2f}")
+                  f"floor ${dynamic_floor:+.2f} | giveback {effective_giveback_pct:.1f}%{ladder_msg}")
 
             if pnl_usd <= dynamic_floor:
                 msg = (f"\n[TRAIL$] Stop atingido: pnl ${pnl_usd:+.2f} <= floor ${dynamic_floor:+.2f} "

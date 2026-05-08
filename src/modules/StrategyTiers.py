@@ -53,6 +53,43 @@ DEFAULT_TIER = 3
 STATE_PATH = Path(os.getenv("PAPER_STATE_PATH", "src/logs/paper_balance/state.json"))
 
 
+# Ladder de protecao escalonada por % de lucro do peak. Cada degrau:
+# (peak_pct_threshold, locked_pct). Quando o peak atinge o threshold,
+# o trail trava no minimo o locked_pct do notional.
+# Resultado: trail nao "devolve" mais conforme o lucro cresce.
+#
+# Ex.: peak 5% -> trava 3%; peak 7% -> trava 5%; peak 10% -> trava 8%.
+# O sistema combina com giveback adaptativo via max(): sempre o piso
+# mais protetor entre giveback% do peak e o ladder vence.
+PROFIT_LOCK_LADDER: list[tuple[float, float]] = [
+    (5.0, 3.0),
+    (7.0, 5.0),
+    (10.0, 8.0),
+    (15.0, 13.0),
+    (20.0, 17.0),
+    (30.0, 27.0),
+    (50.0, 45.0),
+    (75.0, 70.0),
+]
+
+
+def compute_ladder_floor_usd(peak_usd: float, notional_usd: float) -> tuple[float, float]:
+    """Retorna (floor_usd, locked_pct) baseado no peak e notional da posicao.
+
+    locked_pct=0 significa que ainda nao bateu nenhum degrau; floor_usd=0.
+    """
+    if notional_usd <= 0 or peak_usd <= 0:
+        return 0.0, 0.0
+    peak_pct = (peak_usd / notional_usd) * 100.0
+    locked_pct = 0.0
+    for threshold, lock in PROFIT_LOCK_LADDER:
+        if peak_pct >= threshold:
+            locked_pct = lock
+        else:
+            break
+    return notional_usd * (locked_pct / 100.0), locked_pct
+
+
 def _load_state() -> dict:
     try:
         with STATE_PATH.open(encoding="utf-8") as f:
