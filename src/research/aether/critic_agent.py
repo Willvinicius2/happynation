@@ -16,6 +16,7 @@ Subir com:
 """
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import os
@@ -785,7 +786,15 @@ def main() -> int:
     if not DB_PATH.exists():
         log.error(f"DB nao existe: {DB_PATH}")
         return 1
+    _torch = None
+    try:
+        import torch as _torch  # type: ignore
+    except ImportError:
+        pass
+
+    idle_streak = 0
     while True:
+        a, r = 0, 0
         try:
             with _connect() as conn:
                 a, r = run_once(conn, log)
@@ -795,6 +804,22 @@ def main() -> int:
             log.warning(f"sqlite busy/lock: {e}")
         except Exception as e:
             log.exception(f"erro no ciclo: {e}")
+        # Libera RAM/VRAM entre ciclos. Critic processa em rajadas curtas e
+        # fica idle aguardando POLL_SECONDS. Quando idle por 2+ ciclos,
+        # tambem dropa o _DATASET_CACHE in-memory (parquet em disco recarrega rapido).
+        if a == 0 and r == 0:
+            idle_streak += 1
+        else:
+            idle_streak = 0
+        gc.collect()
+        if _torch is not None and _torch.cuda.is_available():
+            _torch.cuda.empty_cache()
+        if idle_streak >= 2:
+            try:
+                _compute_mod._DATASET_CACHE.clear()
+                gc.collect()
+            except AttributeError:
+                pass
         time.sleep(POLL_SECONDS)
 
 
