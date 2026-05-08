@@ -1,0 +1,7 @@
+[tool.black]
+line-length = 130
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
