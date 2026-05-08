@@ -252,6 +252,25 @@ def _asset_family_tf_key(rec: dict) -> str:
     return "|".join([_asset_for(rec), _family_for(rec), str(rec.get("timeframe") or "")])
 
 
+def _functional_fingerprint(rec: dict) -> tuple:
+    """Identidade pelo *resultado* do backtest, nao pelos params.
+
+    Dois records com params diferentes mas que produziram exatamente o mesmo
+    pnl/trades/mdd/hit em (asset, timeframe) sao clones funcionais — params
+    triviais que nao alteram o sinal. O dedupe por params byte-a-byte deixa
+    passar; este funcional pega.
+    """
+    summary = rec.get("summary") or {}
+    return (
+        rec.get("asset"),
+        rec.get("timeframe"),
+        round(float(summary.get("pnl_pct") or 0.0), 2),
+        int(summary.get("trade_count") or 0),
+        round(float(summary.get("mdd_pct") or 0.0), 2),
+        round(float(summary.get("hit_rate") or 0.0), 4),
+    )
+
+
 def _select_deploy_records(ranked: list[tuple[float, dict]]) -> list[tuple[float, dict]]:
     selected: list[tuple[float, dict]] = []
     family_counts: dict[str, int] = {}
@@ -287,7 +306,7 @@ def run_once(log: logging.Logger) -> dict:
         if rec is None:
             continue
         candidates.append((float(row["score"]), rec))
-    # Dedupe por (engine, params, asset, risk) — preserva apenas o de maior score.
+    # Dedupe estrutural por (engine, params, asset, risk) — preserva o de maior score.
     by_key: dict[str, tuple[float, dict]] = {}
     for score, rec in candidates:
         key = json.dumps(
@@ -297,7 +316,17 @@ def run_once(log: logging.Logger) -> dict:
         existing = by_key.get(key)
         if existing is None or score > existing[0]:
             by_key[key] = (score, rec)
-    ranked = sorted(by_key.values(), key=lambda x: -x[0])
+    after_struct = len(by_key)
+    # Dedupe funcional por resultado: clones com params triviais diferentes
+    # mas (asset, timeframe, pnl, trades, mdd, hit) identicos colapsam.
+    by_func: dict[tuple, tuple[float, dict]] = {}
+    for score, rec in by_key.values():
+        fp = _functional_fingerprint(rec)
+        existing = by_func.get(fp)
+        if existing is None or score > existing[0]:
+            by_func[fp] = (score, rec)
+    func_dropped = after_struct - len(by_func)
+    ranked = sorted(by_func.values(), key=lambda x: -x[0])
     deduped = _select_deploy_records(ranked)
 
     # Identifica o que precisa sair: ids do manifest atual nao mais elegiveis.
@@ -313,7 +342,11 @@ def run_once(log: logging.Logger) -> dict:
         deploy_record(rec, max_per_family=MAX_PER_FAMILY)
         deployed += 1
 
-    log.info(f"deploy: candidates={len(candidates)} after_dedupe={len(deduped)} deployed={deployed} removed_stale={removed}")
+    log.info(
+        f"deploy: candidates={len(candidates)} struct_dedupe={after_struct} "
+        f"func_dropped={func_dropped} after_dedupe={len(deduped)} "
+        f"deployed={deployed} removed_stale={removed}"
+    )
     return {"deployed": deployed, "removed": removed, "candidates": len(candidates)}
 
 
