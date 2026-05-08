@@ -3,12 +3,12 @@
 SL/trail variam por tier. Estrategias melhores podem arriscar mais e ter trail
 mais largo (pra capturar tendencias). Piores tem stops apertados.
 
-Razao calibrada: SL = 2% da posicao, trailing ativa em +1%, floor +0.6%.
-Antes: SL = 10% da posicao, trail ativava em +4% (largo demais, nunca disparava).
+Razao calibrada: SL = 2% da posicao, trailing ativa em +1%, floor +1.0%
+(garante minimo 1% de lucro travado quando trail ativa).
 
-Tier 1 (melhor):     posicao $200, SL -$4.00, trail +$2.00, floor +$1.20
-Tier 2 (top 2-5):    posicao $150, SL -$3.00, trail +$1.50, floor +$0.90
-Tier 3 (resto/sem historico): posicao $100, SL -$2.00, trail +$1.00, floor +$0.60
+Tier 1 (melhor):     posicao $200, SL -$4.00, trail +$2.00, floor +$2.00 (+1%)
+Tier 2 (top 2-5):    posicao $150, SL -$3.00, trail +$1.50, floor +$1.50 (+1%)
+Tier 3 (resto/sem historico): posicao $100, SL -$2.00, trail +$1.00, floor +$1.00 (+1%)
 
 Ranking: PnL realizado (decrescente). Strategies sem trades vao pra tier 3.
 Banca $1000: max ~6 posicoes T3 simultaneas (6 x $100 = $600). Sinais
@@ -22,26 +22,29 @@ import os
 from pathlib import Path
 
 # Tier -> parametros de risco/posicao
+# trail_floor_usd igual a trail_activation_usd: garante que quando o trail
+# ativa, o pior caso ainda trava o minimo de 1% de lucro (giveback so corre
+# acima desse piso).
 TIER_CONFIG = {
     1: {
         "position_usd": 200.0,
         "sl_usd": 4.0,
         "trail_activation_usd": 2.0,
-        "trail_floor_usd": 1.2,
+        "trail_floor_usd": 2.0,
         "trail_giveback_pct": 25.0,
     },
     2: {
         "position_usd": 150.0,
         "sl_usd": 3.0,
         "trail_activation_usd": 1.5,
-        "trail_floor_usd": 0.9,
+        "trail_floor_usd": 1.5,
         "trail_giveback_pct": 25.0,
     },
     3: {
         "position_usd": 100.0,
         "sl_usd": 2.0,
         "trail_activation_usd": 1.0,
-        "trail_floor_usd": 0.6,
+        "trail_floor_usd": 1.0,
         "trail_giveback_pct": 25.0,
     },
 }

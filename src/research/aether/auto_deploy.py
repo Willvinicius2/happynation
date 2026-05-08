@@ -80,8 +80,11 @@ ALLOWED_TIMEFRAMES = _env_csv_set("AETHER_DEPLOY_ALLOWED_TIMEFRAMES", "1H")
 DEPLOY_TOP_N = _env_int("AETHER_DEPLOY_TOP_N", 80)
 
 # Default risk se nao houver no node.
+# TP 10% deixa o trail decidir a saida na maioria dos casos: ele reage ao
+# topo real de cada trade enquanto TP fixo so age na cota. SL 2% e maxhold 96
+# permanecem como rede de seguranca.
 DEFAULT_RISK = {
-    "take_profit_pct": 3.0,
+    "take_profit_pct": 10.0,
     "stop_loss_pct": 2.0,
     "max_hold_candles": 96,
 }
