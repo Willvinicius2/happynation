@@ -869,7 +869,65 @@ def _build_signals(engine: str, df: pd.DataFrame, params: dict[str, Any]) -> pd.
         return _signals_hull_suite(close, params)
     if engine == "rsi_divergence":
         return _signals_rsi_divergence(df, params)
+    if engine == "sniper_csbender":
+        return _signals_sniper_csbender(df, params)
     raise ValueError(f"engine nao suportada: {engine}")
+
+
+def _signals_sniper_csbender(df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
+    """Sniper CSBender_ -- cruzamento de open/close em candles agregados.
+
+    Aprovada por Critic v4 em BNBUSDT 1d (4/4 gates) com pnl +58.37%, mdd 32.65%.
+    Em TFs <= 12h faz resample pra 720min (sem look-ahead) e propaga sinal.
+    Em TFs >= 12h (1d) usa cruzamento candle-a-candle do proprio TF.
+    """
+    period_minutes = int(params.get("period_minutes", 720))
+    tf_label = str(params.get("timeframe", ""))
+    tf_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+    base_min = tf_minutes.get(tf_label, 60)
+    n = len(df)
+    if base_min < period_minutes:
+        df_idx = df.copy()
+        if "open_time" in df_idx.columns:
+            ot = df_idx["open_time"]
+            if not pd.api.types.is_datetime64_any_dtype(ot):
+                ot = pd.to_datetime(ot, utc=True)
+            df_idx = df_idx.assign(_t=ot).set_index("_t").sort_index()
+        else:
+            df_idx.index = pd.date_range("2020-01-01", periods=n, freq=f"{base_min}min")
+        rule = f"{period_minutes}min"
+        agg = df_idx.resample(rule, label="right", closed="right").agg({
+            "open": "first", "high": "max", "low": "min", "close": "last",
+        }).dropna()
+        o = agg["open"]; c = agg["close"]
+        long_cond = ((c > o) & (c.shift(1) <= o.shift(1))).fillna(False).values
+        short_cond = ((c < o) & (c.shift(1) >= o.shift(1))).fillna(False).values
+        pos_arr = np.zeros(len(agg), dtype=np.int8)
+        cur = 0
+        for i in range(len(agg)):
+            if long_cond[i]:
+                cur = 1
+            elif short_cond[i]:
+                cur = 0  # spot long-only
+            pos_arr[i] = cur
+        pos_series = pd.Series(pos_arr, index=agg.index)
+        # Shift +1 pra evitar look-ahead
+        pos_full = pos_series.reindex(df_idx.index, method="ffill").shift(1).fillna(0).astype(int)
+        return pd.Series(pos_full.values.astype(np.int8), index=df.index)
+    else:
+        o = df["open"].astype(float).reset_index(drop=True)
+        c = df["close"].astype(float).reset_index(drop=True)
+        long_cond = ((c > o) & (c.shift(1) <= o.shift(1))).fillna(False).values
+        short_cond = ((c < o) & (c.shift(1) >= o.shift(1))).fillna(False).values
+        pos_arr = np.zeros(n, dtype=np.int8)
+        cur = 0
+        for i in range(n):
+            if long_cond[i]:
+                cur = 1
+            elif short_cond[i]:
+                cur = 0
+            pos_arr[i] = cur
+        return pd.Series(pos_arr, index=df.index)
 
 
 def _signals_rsi_divergence(df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
