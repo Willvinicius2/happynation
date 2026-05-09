@@ -871,7 +871,68 @@ def _build_signals(engine: str, df: pd.DataFrame, params: dict[str, Any]) -> pd.
         return _signals_rsi_divergence(df, params)
     if engine == "sniper_csbender":
         return _signals_sniper_csbender(df, params)
+    if engine == "sma_cross_exits":
+        return _signals_sma_cross_exits(df, params)
     raise ValueError(f"engine nao suportada: {engine}")
+
+
+def _signals_sma_cross_exits(df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
+    """SMA crossover (adolgov) com TP/SL fixos -- adaptado para spot long-only.
+
+    LONG entry: SMA(short) cruza acima de SMA(long).
+    Saida: TP, SL ou cross contrario (SMA short < long).
+
+    Aprovada por Critic v4 em BTCUSDT 1d com:
+      - V2 (TP+4%, SL-2%): pnl +26.28%, mdd 8.13%, sharpe 0.82
+      - WF [-3.86, +9.54, +16.62, -1.82] (3/4 ok)
+      - CS SOL +16.80% (1/3 alts)
+      - Perturb +/-30% nos params: median +3.28%, 80% pos
+      - Bootstrap P5 +0.227
+
+    Estrategia original Pine usa scaled exits (25% em cada nivel +1/+2/+3/+4%).
+    Como motor aceita so signal binario, usamos TP unico (+4% target final).
+    """
+    short_len = int(params.get("short_len", 14))
+    long_len = int(params.get("long_len", 28))
+    tp_pct = params.get("take_profit_pct")
+    sl_pct = params.get("stop_loss_pct")
+
+    close = df["close"].astype(float).reset_index(drop=True)
+    high = df["high"].astype(float).reset_index(drop=True) if "high" in df.columns else close
+    low = df["low"].astype(float).reset_index(drop=True) if "low" in df.columns else close
+
+    sma_s = close.rolling(short_len, min_periods=short_len).mean()
+    sma_l = close.rolling(long_len, min_periods=long_len).mean()
+
+    cross_up = ((sma_s > sma_l) & (sma_s.shift(1) <= sma_l.shift(1))).fillna(False).values
+    cross_down = ((sma_s < sma_l) & (sma_s.shift(1) >= sma_l.shift(1))).fillna(False).values
+
+    n = len(df)
+    close_arr = close.values
+    high_arr = high.values
+    low_arr = low.values
+
+    sig = np.zeros(n, dtype=np.int8)
+    pos = 0
+    entry = 0.0
+    for i in range(n):
+        if pos == 0:
+            if cross_up[i]:
+                pos = 1
+                entry = close_arr[i]
+        else:
+            should_exit = False
+            if tp_pct is not None and high_arr[i] >= entry * (1.0 + tp_pct / 100.0):
+                should_exit = True
+            elif sl_pct is not None and low_arr[i] <= entry * (1.0 - sl_pct / 100.0):
+                should_exit = True
+            elif cross_down[i]:
+                should_exit = True
+            if should_exit:
+                pos = 0
+                entry = 0.0
+        sig[i] = pos
+    return pd.Series(sig, index=df.index)
 
 
 def _signals_sniper_csbender(df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
