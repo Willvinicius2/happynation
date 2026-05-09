@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-09T14:46:54Z",
+  "updated_at": "2026-05-09T15:18:34Z",
   "strategies": [
     {
       "id": "manual-hybrid-breakout-eth-4h",
@@ -42,6 +42,39 @@
       },
       "source_node_id": "manual:hybrid_breakout:eth-4h",
       "source": "aether_manual_v3"
+    },
+    {
+      "id": "manual-hull-suite-btc-1d",
+      "engine": "hull_suite",
+      "params": {
+        "length": 55,
+        "mode": "Hma"
+      },
+      "asset": "BTCUSDT",
+      "timeframe": "1d",
+      "score": 0.92,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Hull Suite Strategy (DashTrader/InSilico) -- BTC 1d",
+        "pnl_pct": 154.02,
+        "sharpe": 1.13,
+        "mdd_pct": 33.92,
+        "trade_count": 24,
+        "hit_rate": 0.391,
+        "validation_passed": true,
+        "validation_stage": "critic_v4_full",
+        "validated_at": "2026-05-09T00:50:00Z",
+        "validated_by": "manual_critic_v4",
+        "critic_status": "approved",
+        "critic_reason": "WF 3/3 PASS, cross-symbol 3/3 alts positivos, perturb length 100% positivos, bootstrap P5+0.38",
+        "combo_count": 1
+      },
+      "source_node_id": "manual:hull_suite:btc-1d",
+      "source": "aether_manual_hull"
     },
     {
       "id": "aether-723145b7a7993b",

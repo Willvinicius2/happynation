@@ -865,7 +865,66 @@ def _build_signals(engine: str, df: pd.DataFrame, params: dict[str, Any]) -> pd.
         return _signals_structure_break(high, low, close, params)
     if engine == "hybrid_breakout":
         return _signals_hybrid_breakout(df, params)
+    if engine == "hull_suite":
+        return _signals_hull_suite(close, params)
     raise ValueError(f"engine nao suportada: {engine}")
+
+
+def _signals_hull_suite(close: pd.Series, params: dict[str, Any]) -> pd.Series:
+    """Hull Suite (DashTrader/InSilico) -- adaptado long-only para spot Binance.
+
+    HMA, EHMA ou THMA com length configuravel. Sinal:
+    - HMA[atual] > HMA[2 candles atras] -> LONG (1)
+    - HMA[atual] < HMA[2 candles atras] -> EXIT (0); spot nao shorta.
+
+    Aprovada por Critic v4 em BTCUSDT 1d (4/4 gates) com PnL +154%, MDD 33.9%,
+    Sharpe 1.13. ETH/SOL/BNB 1d reprovaram (WF inconsistente).
+    """
+    import math as _math
+
+    length = int(params.get("length", 55))
+    mode = str(params.get("mode", "Hma"))
+
+    def _wma(s: pd.Series, n: int) -> pd.Series:
+        if n <= 1:
+            return s.copy()
+        weights = np.arange(1, n + 1, dtype=float)
+        weights /= weights.sum()
+        return s.rolling(n, min_periods=n).apply(
+            lambda x: float(np.dot(x, weights)), raw=True
+        )
+
+    def _ema(s: pd.Series, n: int) -> pd.Series:
+        return s.ewm(span=max(1, n), adjust=False).mean()
+
+    def _hma(src: pd.Series, n: int) -> pd.Series:
+        half = max(1, n // 2)
+        sqrt_n = max(1, int(round(_math.sqrt(n))))
+        return _wma(2 * _wma(src, half) - _wma(src, n), sqrt_n)
+
+    def _ehma(src: pd.Series, n: int) -> pd.Series:
+        half = max(1, n // 2)
+        sqrt_n = max(1, int(round(_math.sqrt(n))))
+        return _ema(2 * _ema(src, half) - _ema(src, n), sqrt_n)
+
+    def _thma(src: pd.Series, n_in: int) -> pd.Series:
+        # Pine usa length/2 como n para THMA
+        nn = max(1, n_in // 2)
+        third = max(1, nn // 3)
+        half = max(1, nn // 2)
+        return _wma(_wma(src, third) * 3 - _wma(src, half) - _wma(src, nn), nn)
+
+    if mode == "Hma":
+        hull = _hma(close, length)
+    elif mode == "Ehma":
+        hull = _ehma(close, length)
+    elif mode == "Thma":
+        hull = _thma(close, length)
+    else:
+        raise ValueError(f"hull_suite mode invalido: {mode}")
+
+    cond_long = (hull > hull.shift(2)).fillna(False).astype(int)
+    return cond_long.astype(np.int8).reset_index(drop=True)
 
 
 def _signals_hybrid_breakout(df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
