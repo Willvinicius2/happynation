@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-09T15:18:34Z",
+  "updated_at": "2026-05-09T15:32:38Z",
   "strategies": [
     {
       "id": "manual-hybrid-breakout-eth-4h",
@@ -2534,6 +2534,117 @@
       "source_node_id": "mut:llmhyp:rsi-extreme-regime-low-:222c8e1ddd",
       "source": "aether_auto_deploy",
       "deployed_at": "2026-05-09T07:23:10Z"
+    },
+    {
+      "id": "manual-rsi-div-btc-4h",
+      "engine": "rsi_divergence",
+      "params": {
+        "rsi_len": 9,
+        "lbL": 1,
+        "lbR": 3,
+        "take_profit_rsi": 80,
+        "range_lower": 5,
+        "range_upper": 60
+      },
+      "asset": "BTCUSDT",
+      "timeframe": "4h",
+      "score": 0.78,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "RSI Divergence (TV) -- BTCUSDT 4h",
+        "pnl_pct": 59.9,
+        "sharpe": 0.93,
+        "mdd_pct": 26.82,
+        "trade_count": 23,
+        "hit_rate": 0.652,
+        "validation_passed": true,
+        "validation_stage": "critic_v4_full",
+        "validated_at": "2026-05-09T01:00:00Z",
+        "validated_by": "manual_critic_v4",
+        "critic_status": "approved",
+        "critic_reason": "WF 4/4 PASS, CS 3/3 alts pos, perturb 100% pos, BS P5 -0.145",
+        "combo_count": 1
+      },
+      "source_node_id": "manual:rsi_divergence:btc-4h",
+      "source": "aether_manual_rsi_div"
+    },
+    {
+      "id": "manual-rsi-div-sol-4h",
+      "engine": "rsi_divergence",
+      "params": {
+        "rsi_len": 9,
+        "lbL": 1,
+        "lbR": 3,
+        "take_profit_rsi": 80,
+        "range_lower": 5,
+        "range_upper": 60
+      },
+      "asset": "SOLUSDT",
+      "timeframe": "4h",
+      "score": 0.92,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "RSI Divergence (TV) -- SOLUSDT 4h",
+        "pnl_pct": 189.04,
+        "sharpe": 1.39,
+        "mdd_pct": 37.91,
+        "trade_count": 23,
+        "hit_rate": 0.783,
+        "validation_passed": true,
+        "validation_stage": "critic_v4_full",
+        "validated_at": "2026-05-09T01:00:00Z",
+        "validated_by": "manual_critic_v4",
+        "critic_status": "approved",
+        "critic_reason": "WF 4/4 PASS (todos folds positivos!), CS 3/3, perturb 100% pos, BS P5 +0.759",
+        "combo_count": 1
+      },
+      "source_node_id": "manual:rsi_divergence:sol-4h",
+      "source": "aether_manual_rsi_div"
+    },
+    {
+      "id": "manual-rsi-div-bnb-1d",
+      "engine": "rsi_divergence",
+      "params": {
+        "rsi_len": 9,
+        "lbL": 1,
+        "lbR": 3,
+        "take_profit_rsi": 80,
+        "range_lower": 5,
+        "range_upper": 60
+      },
+      "asset": "BNBUSDT",
+      "timeframe": "1d",
+      "score": 0.78,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "RSI Divergence (TV) -- BNBUSDT 1d",
+        "pnl_pct": 48.4,
+        "sharpe": 0.94,
+        "mdd_pct": 14.15,
+        "trade_count": 4,
+        "hit_rate": 0.667,
+        "validation_passed": true,
+        "validation_stage": "critic_v4_full",
+        "validated_at": "2026-05-09T01:00:00Z",
+        "validated_by": "manual_critic_v4",
+        "critic_status": "approved",
+        "critic_reason": "WF 4/4 PASS, CS 2/3 (BTC -0.5, ETH -20.4, SOL +29.7), perturb 100% pos, BS P5 +0.126",
+        "combo_count": 1
+      },
+      "source_node_id": "manual:rsi_divergence:bnb-1d",
+      "source": "aether_manual_rsi_div"
     }
   ]
 }

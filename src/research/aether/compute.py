@@ -867,7 +867,131 @@ def _build_signals(engine: str, df: pd.DataFrame, params: dict[str, Any]) -> pd.
         return _signals_hybrid_breakout(df, params)
     if engine == "hull_suite":
         return _signals_hull_suite(close, params)
+    if engine == "rsi_divergence":
+        return _signals_rsi_divergence(df, params)
     raise ValueError(f"engine nao suportada: {engine}")
+
+
+def _signals_rsi_divergence(df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
+    """RSI Divergence (TV) -- so Regular Bull entry (V2 sem Hidden Bull).
+
+    Detecta divergencias entre RSI e preco usando pivots:
+    - Regular Bull: preco LL + RSI HL -> LONG
+    - Saida: RSI cruza > take_profit_rsi (default 80) OU Regular Bear detectado
+    Long-only para spot Binance.
+
+    Aprovada por Critic v4 (sem Hidden Bull) em:
+      BTC 4h: WF 4/4, sharpe 0.93, pnl +59.90%, mdd 26.82%
+      SOL 4h: WF 4/4, sharpe 1.39, pnl +189.04%, mdd 37.91%
+      BNB 1d: WF 4/4, sharpe 0.94, pnl +48.40%, mdd 14.15%
+    """
+    rsi_len = int(params.get("rsi_len", 9))
+    lbL = int(params.get("lbL", 1))
+    lbR = int(params.get("lbR", 3))
+    range_lower = int(params.get("range_lower", 5))
+    range_upper = int(params.get("range_upper", 60))
+    take_profit_rsi = int(params.get("take_profit_rsi", 80))
+
+    close = df["close"].astype(float).reset_index(drop=True)
+    high = df["high"].astype(float).reset_index(drop=True)
+    low = df["low"].astype(float).reset_index(drop=True)
+
+    # RSI Wilder
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / rsi_len, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / rsi_len, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    osc = (100 - (100 / (1 + rs))).fillna(50)
+    osc_arr = osc.values
+
+    n = len(close)
+    high_arr = high.values
+    low_arr = low.values
+
+    # Pivot detection
+    def find_piv(arr, kind):
+        out = np.full(n, np.nan)
+        for i in range(lbL + lbR, n):
+            center = i - lbR
+            win_start = max(0, center - lbL)
+            win_end = i + 1
+            window = arr[win_start:win_end]
+            if not np.isfinite(arr[center]):
+                continue
+            if kind == "low" and arr[center] == window.min():
+                out[i] = arr[center]
+            elif kind == "high" and arr[center] == window.max():
+                out[i] = arr[center]
+        return out
+
+    pl_val = find_piv(osc_arr, "low")
+    ph_val = find_piv(osc_arr, "high")
+    pl_found = ~np.isnan(pl_val)
+    ph_found = ~np.isnan(ph_val)
+
+    osc_at_pl = np.where(pl_found, np.array([osc_arr[i - lbR] if i >= lbR else np.nan for i in range(n)]), np.nan)
+    low_at_pl = np.where(pl_found, np.array([low_arr[i - lbR] if i >= lbR else np.nan for i in range(n)]), np.nan)
+    osc_at_ph = np.where(ph_found, np.array([osc_arr[i - lbR] if i >= lbR else np.nan for i in range(n)]), np.nan)
+    high_at_ph = np.where(ph_found, np.array([high_arr[i - lbR] if i >= lbR else np.nan for i in range(n)]), np.nan)
+
+    def valuewhen_n(cond, source, k):
+        out = np.full(n, np.nan)
+        idxs: list[int] = []
+        for i in range(n):
+            if cond[i]:
+                idxs.append(i)
+            if len(idxs) > k:
+                out[i] = source[idxs[-(k + 1)]]
+        return out
+
+    osc_prev_pl = valuewhen_n(pl_found, osc_at_pl, 1)
+    low_prev_pl = valuewhen_n(pl_found, low_at_pl, 1)
+    osc_prev_ph = valuewhen_n(ph_found, osc_at_ph, 1)
+    high_prev_ph = valuewhen_n(ph_found, high_at_ph, 1)
+
+    def bars_since_prev(cond):
+        out = np.full(n, -1)
+        last = -1
+        for i in range(n):
+            if i > 0 and cond[i - 1]:
+                last = i - 1
+            out[i] = (i - last) if last >= 0 else -1
+        return out
+
+    bars_pl = bars_since_prev(pl_found)
+    bars_ph = bars_since_prev(ph_found)
+    in_range_pl = (bars_pl >= range_lower) & (bars_pl <= range_upper)
+    in_range_ph = (bars_ph >= range_lower) & (bars_ph <= range_upper)
+
+    osc_hl = (osc_at_pl > osc_prev_pl) & in_range_pl
+    price_ll = low_at_pl < low_prev_pl
+    bull_cond = pl_found & osc_hl & price_ll
+
+    osc_lh = (osc_at_ph < osc_prev_ph) & in_range_ph
+    price_hh = high_at_ph > high_prev_ph
+    bear_cond = ph_found & osc_lh & price_hh
+
+    cross_above = np.zeros(n, dtype=bool)
+    for i in range(1, n):
+        if osc_arr[i] > take_profit_rsi and osc_arr[i - 1] <= take_profit_rsi:
+            cross_above[i] = True
+
+    long_entry = bull_cond
+    long_exit = cross_above | bear_cond
+
+    sig = np.zeros(n, dtype=np.int8)
+    pos = 0
+    for i in range(n):
+        if pos == 0:
+            if long_entry[i]:
+                pos = 1
+        else:
+            if long_exit[i]:
+                pos = 0
+        sig[i] = pos
+    return pd.Series(sig, index=df.index)
 
 
 def _signals_hull_suite(close: pd.Series, params: dict[str, Any]) -> pd.Series:
