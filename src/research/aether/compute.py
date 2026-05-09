@@ -863,7 +863,100 @@ def _build_signals(engine: str, df: pd.DataFrame, params: dict[str, Any]) -> pd.
         return _signals_vol_compression(high, low, close, params)
     if engine == "structure_break":
         return _signals_structure_break(high, low, close, params)
+    if engine == "hybrid_breakout":
+        return _signals_hybrid_breakout(df, params)
     raise ValueError(f"engine nao suportada: {engine}")
+
+
+def _signals_hybrid_breakout(df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
+    """Hybrid breakout adaptado do TradingView (RugSurvivor) com 3 melhorias V3:
+    - Remove componente RSI mean-revert (Pine original tinha tambem)
+    - Stop inicial fixo: -atr_mult_stop * ATR abaixo do entry
+    - Filtro de volume: so entra se volume > SMA(vol, vol_sma_len) * vol_mult
+    Trail ativa apos +1 ATR de lucro; usa max(initial_stop, peak - atr_mult_trail*ATR).
+
+    Aprovada por Critic v4 (walk-forward 3/4, cross-symbol BTC, perturb 100% pos,
+    bootstrap P5+0.24) em ETHUSDT 4h. Sharpe 1.25, MDD 21.91%, PnL +83.71%.
+    """
+    high = df["high"].astype(float).reset_index(drop=True)
+    low = df["low"].astype(float).reset_index(drop=True)
+    close = df["close"].astype(float).reset_index(drop=True)
+    volume = (df["volume"].astype(float).reset_index(drop=True)
+              if "volume" in df.columns else pd.Series([1.0] * len(df)))
+
+    adx_len = int(params.get("adx_len", 14))
+    adx_smooth = int(params.get("adx_smooth", 14))
+    adx_thr = float(params.get("adx_thr", 20.0))
+    ema_len = int(params.get("ema_len", 200))
+    breakout_len = int(params.get("breakout_len", 20))
+    atr_len = int(params.get("atr_len", 14))
+    atr_mult_trail = float(params.get("atr_mult_trail", 2.0))
+    atr_mult_stop = float(params.get("atr_mult_stop", 1.5))
+    vol_sma_len = int(params.get("vol_sma_len", 20))
+    vol_mult = float(params.get("vol_mult", 1.3))
+
+    # ADX (Wilder)
+    up = high.diff()
+    down = -low.diff()
+    plus_dm = up.where((up > down) & (up > 0), 0.0)
+    minus_dm = down.where((down > up) & (down > 0), 0.0)
+    prev_close = close.shift(1)
+    tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
+                   axis=1).max(axis=1)
+    atr_for_adx = tr.ewm(alpha=1 / adx_len, adjust=False).mean().replace(0, np.nan)
+    plus_di = 100 * plus_dm.ewm(alpha=1 / adx_len, adjust=False).mean() / atr_for_adx
+    minus_di = 100 * minus_dm.ewm(alpha=1 / adx_len, adjust=False).mean() / atr_for_adx
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    adx_v = dx.ewm(alpha=1 / adx_smooth, adjust=False).mean().fillna(0)
+
+    is_trending = (adx_v > adx_thr).fillna(False)
+    ema_v = close.ewm(span=ema_len, adjust=False).mean()
+    bullish = (close > ema_v).fillna(False)
+    highest_break = close.shift(1).rolling(breakout_len, min_periods=breakout_len).max()
+    atr_v = tr.ewm(alpha=1 / atr_len, adjust=False).mean()
+
+    vol_sma = volume.rolling(vol_sma_len, min_periods=vol_sma_len).mean()
+    vol_ok = (volume > vol_sma * vol_mult).fillna(False)
+
+    long_break_entry = (is_trending & bullish & (close > highest_break).fillna(False) & vol_ok).values
+
+    close_arr = close.values
+    atr_arr = atr_v.values
+
+    sig = np.zeros(len(df), dtype=np.int8)
+    pos = 0
+    entry_price = 0.0
+    initial_stop = 0.0
+    peak = 0.0
+    trail_active = False
+    for i in range(len(df)):
+        if pos == 0:
+            if long_break_entry[i]:
+                pos = 1
+                entry_price = close_arr[i]
+                initial_stop = entry_price - atr_mult_stop * atr_arr[i]
+                peak = close_arr[i]
+                trail_active = False
+        else:
+            if close_arr[i] > peak:
+                peak = close_arr[i]
+            if close_arr[i] >= entry_price + atr_arr[i]:
+                trail_active = True
+            if not trail_active:
+                if close_arr[i] < initial_stop:
+                    pos = 0
+            else:
+                trail_stop = peak - atr_mult_trail * atr_arr[i]
+                effective_stop = max(initial_stop, trail_stop)
+                if close_arr[i] < effective_stop:
+                    pos = 0
+            if pos == 0:
+                entry_price = 0.0
+                initial_stop = 0.0
+                peak = 0.0
+                trail_active = False
+        sig[i] = pos
+    return pd.Series(sig, index=df.index)
 
 
 # ---------------------------------------------------------------------------
