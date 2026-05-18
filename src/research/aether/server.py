@@ -30,6 +30,7 @@ from .orchestrator import (
     cycle_mode,
     is_cycle_running,
     is_stop_requested,
+    prune_weak_branches,
     queue_scout_tasks,
     start_cycle_background,
     stop_cycle,
@@ -909,6 +910,14 @@ def api_start_cycle(
 @app.post("/api/cycle/stop")
 def api_stop_cycle() -> dict:
     return stop_cycle()
+
+
+@app.post("/api/prune/weak")
+def api_prune_weak(limit: int = Query(default=12, ge=1, le=50)) -> dict:
+    with connect() as conn:
+        result = prune_weak_branches(conn, limit=limit)
+        mark_agents_without_work_standby(conn)
+    return {"ok": True, **result}
 
 
 @app.post("/api/manifest/{node_id:path}")

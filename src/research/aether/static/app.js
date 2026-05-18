@@ -1449,6 +1449,8 @@ let _agentsNetwork = null;
 let _agentsNetData = null;
 let _mindmapLoading = false;
 let _mindmapLastFetch = 0;
+let _agentsGraphLast = null;
+let _agentsGraphSelectedId = null;
 const MINDMAP_MIN_INTERVAL_MS = 6000;
 
 function _waitForVis(retries = 30) {
@@ -1502,6 +1504,11 @@ function renderMindmapFocus(res) {
         _agentsNetwork.selectNodes([graphId]);
         _agentsNetwork.focus(graphId, { scale: 1.2, animation: { duration: 450, easingFunction: "easeOutCubic" } });
       }
+      if (graphId) {
+        _agentsGraphSelectedId = graphId;
+        const graphNode = _agentsNetData?.nodes?.get(graphId) || (res.nodes || []).find((node) => node.id === graphId);
+        renderAgentsGraphDetail(graphNode);
+      }
       if (rawNodeId && state.data) {
         state.selected = rawNodeId;
         const n = state.data.nodes.find((node) => node.id === rawNodeId);
@@ -1509,6 +1516,167 @@ function renderMindmapFocus(res) {
       }
     });
   }
+}
+
+function detailMetric(label, value) {
+  const clean = value === null || value === undefined || value === "" ? "-" : value;
+  return `<div class="graphDetailMetric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(clean)}</strong></div>`;
+}
+
+function shortNumber(value, digits = 2, suffix = "") {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n.toFixed(digits)}${suffix}`;
+}
+
+function probeText(probe) {
+  if (!probe) return "";
+  const params = probe.params && typeof probe.params === "object"
+    ? Object.entries(probe.params).slice(0, 5).map(([k, v]) => `${k}=${v}`).join(", ")
+    : "";
+  return [probe.symbol, probe.timeframe, params].filter(Boolean).join(" / ");
+}
+
+function renderTaskDetail(task) {
+  if (!task) return `<div class="graphDetailBlock"><div class="graphDetailText">Sem tarefa ativa para este agente.</div></div>`;
+  const metrics = task.metrics || {};
+  const probes = (task.sample_probes && task.sample_probes.length ? task.sample_probes : task.probe_specs) || [];
+  return `
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Trabalho</div>
+      <div class="graphDetailGrid">
+        ${detailMetric("status", task.status || "-")}
+        ${detailMetric("tipo", task.type || "-")}
+        ${detailMetric("timeframe", task.timeframe || "-")}
+        ${detailMetric("probes", task.probes_count || probes.length || 0)}
+        ${detailMetric("score", shortNumber(task.node_score, 3))}
+        ${detailMetric("atualizado", task.updated_at || "-")}
+      </div>
+    </div>
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Node analisado</div>
+      <div class="graphDetailText"><strong>${escapeHtml(task.node_name || task.node_id || "-")}</strong></div>
+      <div class="graphDetailText">${escapeHtml(task.node_id || "-")}</div>
+      ${task.summary ? `<div class="graphDetailText">${escapeHtml(shortText(task.summary, 180))}</div>` : ""}
+    </div>
+    ${task.hypothesis ? `
+      <div class="graphDetailBlock">
+        <div class="graphDetailLabel">Hipotese</div>
+        <div class="graphDetailText">${escapeHtml(shortText(task.hypothesis, 260))}</div>
+      </div>
+    ` : ""}
+    ${task.causal_mechanism ? `
+      <div class="graphDetailBlock">
+        <div class="graphDetailLabel">Mecanismo causal</div>
+        <div class="graphDetailText">${escapeHtml(shortText(task.causal_mechanism, 260))}</div>
+      </div>
+    ` : ""}
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Engines</div>
+      <div class="graphDetailChipRow">
+        ${(task.engines || []).length ? (task.engines || []).map((engine) => `<span class="graphDetailChip">${escapeHtml(engine)}</span>`).join("") : `<span class="graphDetailText">-</span>`}
+      </div>
+    </div>
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Metricas atuais</div>
+      <div class="graphDetailGrid">
+        ${detailMetric("PnL", shortNumber(metrics.pnl_pct, 2, "%"))}
+        ${detailMetric("Sharpe", shortNumber(metrics.sharpe, 2))}
+        ${detailMetric("Trades", metrics.trade_count ?? "-")}
+        ${detailMetric("MDD", shortNumber(metrics.mdd_pct, 2, "%"))}
+        ${detailMetric("Scouts", metrics.scout_count ?? "-")}
+        ${detailMetric("Passes", metrics.pass_count ?? "-")}
+      </div>
+    </div>
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Amostra de probes</div>
+      ${(probes || []).slice(0, 5).map((probe) => `
+        <div class="graphProbe">
+          <strong>${escapeHtml(probe.engine || "-")}</strong>
+          <small>${escapeHtml(probeText(probe) || "-")}</small>
+        </div>
+      `).join("") || `<div class="graphDetailText">Sem probes expostos ainda.</div>`}
+    </div>
+  `;
+}
+
+function renderAgentsGraphDetail(graphNode) {
+  const panel = $("agentsGraphDetail");
+  if (!panel) return;
+  const detail = graphNode?.detail;
+  if (!detail) {
+    panel.innerHTML = `
+      <div class="graphDetailHead">
+        <span>Detalhes</span>
+        <strong>Selecione um agente</strong>
+      </div>
+      <div class="graphDetailBlock">
+        <div class="graphDetailText">Clique em um agente ou em um trabalho para ver o que esta sendo analisado.</div>
+      </div>
+    `;
+    return;
+  }
+  if (detail.kind === "work") {
+    const task = detail.task || {};
+    panel.innerHTML = `
+      <div class="graphDetailHead">
+        <span>${escapeHtml(detail.agent || task.role || "Trabalho")}</span>
+        <strong>${escapeHtml(shortText(task.node_name || task.id || "Detalhe", 44))}</strong>
+      </div>
+      ${renderTaskDetail(task)}
+    `;
+    return;
+  }
+  if (detail.kind === "event") {
+    const event = detail.event || {};
+    panel.innerHTML = `
+      <div class="graphDetailHead">
+        <span>${escapeHtml(detail.agent || "Evento")}</span>
+        <strong>${escapeHtml(event.type || "ultima acao")}</strong>
+      </div>
+      <div class="graphDetailBlock">
+        ${detailMetric("hora", event.ts || "-")}
+        ${detailMetric("alvo", event.target || "-")}
+        <div class="graphDetailText">${escapeHtml(event.message || "-")}</div>
+      </div>
+    `;
+    return;
+  }
+  const tasks = detail.tasks || [];
+  const stats = detail.stats || {};
+  panel.innerHTML = `
+    <div class="graphDetailHead">
+      <span>${escapeHtml(detail.role || "Agente")}</span>
+      <strong>${escapeHtml(detail.label || "Agente")}</strong>
+    </div>
+    <div class="graphDetailBlock">
+      <div class="graphDetailGrid">
+        ${detailMetric("status", detail.status || "-")}
+        ${detailMetric("tipo", detail.agent_kind || "-")}
+        ${detailMetric("timeframe", detail.timeframe || "-")}
+        ${detailMetric("tarefas", tasks.length)}
+        ${detailMetric("fase", stats.phase || "-")}
+        ${detailMetric("task atual", detail.current_task_id || "-")}
+      </div>
+      ${stats.bubble ? `<div class="graphDetailText">${escapeHtml(stats.bubble)}</div>` : ""}
+    </div>
+    ${tasks.length ? tasks.slice(0, 3).map((task, idx) => `
+      <div class="graphDetailBlock">
+        <div class="graphDetailLabel">Tarefa ${idx + 1}</div>
+        ${renderTaskDetail(task)}
+      </div>
+    `).join("") : `
+      <div class="graphDetailBlock">
+        <div class="graphDetailText">Sem tarefa ativa agora. Ultimos eventos:</div>
+        ${(detail.recent_events || []).slice(0, 4).map((event) => `
+          <div class="graphProbe">
+            <strong>${escapeHtml(event.type || "-")}</strong>
+            <small>${escapeHtml([event.ts, shortText(event.message || "", 100)].filter(Boolean).join(" / "))}</small>
+          </div>
+        `).join("") || `<div class="graphDetailText">Nenhum evento recente.</div>`}
+      </div>
+    `}
+  `;
 }
 
 function updateAgentsGraphData(res) {
@@ -1554,6 +1722,7 @@ async function refreshMindmap(force = false) {
   try {
     await _waitForVis();
     const res = await api("/api/agents_graph?limit_per_agent=4");
+    _agentsGraphLast = res;
     const stats = $("agentsGraphStats");
     if (stats) stats.textContent = `${res.stats?.nodes || 0} nodes · ${res.stats?.edges || 0} edges`;
 
@@ -1568,9 +1737,18 @@ async function refreshMindmap(force = false) {
       ].join(" / ");
     }
     renderMindmapFocus(res);
+    if (!_agentsGraphSelectedId && (res.focus || []).length) {
+      _agentsGraphSelectedId = res.focus[0].graph_node_id;
+    }
 
     if (_agentsNetwork && _agentsNetData) {
       updateAgentsGraphData(res);
+      if (_agentsGraphSelectedId) {
+        const selected = _agentsNetData.nodes.get(_agentsGraphSelectedId) || (res.nodes || []).find((node) => node.id === _agentsGraphSelectedId);
+        renderAgentsGraphDetail(selected);
+      } else {
+        renderAgentsGraphDetail(null);
+      }
       _mindmapLoading = false;
       return;
       // update incremental: setData re-estabiliza, evite chamar a cada refresh
@@ -1619,6 +1797,8 @@ async function refreshMindmap(force = false) {
       if (params.nodes && params.nodes.length) {
         const nid = params.nodes[0];
         const selected = _agentsNetData.nodes.get(nid);
+        _agentsGraphSelectedId = nid;
+        renderAgentsGraphDetail(selected);
         if (selected && selected.rawNodeId && state.data) {
           state.selected = selected.rawNodeId;
           const n = state.data.nodes.find((node) => node.id === selected.rawNodeId);
@@ -1628,6 +1808,11 @@ async function refreshMindmap(force = false) {
         _agentsNetData.nodes.update({ id: nid, fixed: !fixed });
       }
     });
+    if (_agentsGraphSelectedId) {
+      renderAgentsGraphDetail(_agentsNetData.nodes.get(_agentsGraphSelectedId));
+    } else {
+      renderAgentsGraphDetail(null);
+    }
   } catch (e) {
     console.error("Erro ao carregar mapa de agentes:", e);
     container.innerHTML = `<div style="padding:20px;color:#ef4444;font-family:system-ui;">Erro ao gerar mapa: ${escapeHtml(e.message)}</div>`;

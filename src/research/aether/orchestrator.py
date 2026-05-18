@@ -314,6 +314,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 FORCE_EXPLORATION_EVERY = _env_int("AETHER_FORCE_EXPLORATION_EVERY", 4)
 LLM_HEARTBEAT_EVERY = _env_int("AETHER_LLM_HEARTBEAT_EVERY", 2)  # gera 1 hipotese LLM a cada N ciclos mesmo se houver candidatos
 WEB_RESEARCH_HEARTBEAT_EVERY = _env_int("AETHER_WEB_RESEARCH_HEARTBEAT_EVERY", 1)
@@ -505,6 +512,7 @@ def _run_research_phase_locked(limit_nodes: int, *, loop_idx: int = 1) -> dict[s
     time.sleep(1.2)
 
     with connect() as conn:
+        weak_prune = prune_weak_branches(conn)
         candidates = best_candidate_nodes(conn, limit=limit_nodes)
         generated = 0
         llm_generated = {"created_hypotheses": 0, "created_nodes": 0, "provider": None, "model": None}
@@ -647,11 +655,17 @@ def _run_research_phase_locked(limit_nodes: int, *, loop_idx: int = 1) -> dict[s
                 f"{generated} nos locais, {web_generated.get('created_nodes', 0)} nos web, "
                 f"{llm_generated.get('created_nodes', 0)} nos LLM."
             ),
-            payload={"candidates": [node["id"] for node in candidates], "generated": generated, "web": web_generated, "llm": llm_generated},
+            payload={
+                "candidates": [node["id"] for node in candidates],
+                "generated": generated,
+                "web": web_generated,
+                "llm": llm_generated,
+                "weak_prune": weak_prune,
+            },
         )
 
     time.sleep(0.8)
-    return {"candidate_count": len(candidates), "generated_nodes": generated}
+    return {"candidate_count": len(candidates), "generated_nodes": generated, "weak_prune": weak_prune}
 
 
 def queue_scout_tasks(
@@ -847,6 +861,206 @@ def _hard_delete_subtree(conn, root_id: str) -> int:
     n = conn.execute(f"DELETE FROM nodes WHERE id IN ({placeholders})", ids).rowcount
     conn.commit()
     return n
+
+
+def _subtree_ids(conn, root_id: str) -> list[str]:
+    if not root_id:
+        return []
+    seen = {root_id}
+    frontier = [root_id]
+    for _ in range(64):
+        if not frontier:
+            break
+        placeholders = ",".join("?" * len(frontier))
+        children = [
+            row[0]
+            for row in conn.execute(
+                f"SELECT id FROM nodes WHERE parent_id IN ({placeholders})",
+                frontier,
+            ).fetchall()
+        ]
+        frontier = [child for child in children if child not in seen]
+        seen.update(frontier)
+    return list(seen)
+
+
+def _ranking_reset_after(conn, campaign_id: str) -> str | None:
+    try:
+        reset_state = get_setting(conn, f"ranking_hidden_node_ids:{campaign_id}", default={})
+    except Exception:
+        return None
+    if isinstance(reset_state, dict) and reset_state.get("reset_at"):
+        return str(reset_state["reset_at"])
+    return None
+
+
+def _subtree_has_live_or_strong_node(conn, node_ids: list[str], *, strong_score: float) -> bool:
+    if not node_ids:
+        return False
+    placeholders = ",".join("?" * len(node_ids))
+    task_row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n
+        FROM tasks
+        WHERE node_id IN ({placeholders}) AND status IN ('queued','running')
+        """,
+        node_ids,
+    ).fetchone()
+    if task_row and int(task_row["n"] if hasattr(task_row, "keys") else task_row[0]) > 0:
+        return True
+
+    rows = conn.execute(
+        f"""
+        SELECT id, status, score, metrics_json
+        FROM nodes
+        WHERE id IN ({placeholders})
+        """,
+        node_ids,
+    ).fetchall()
+    for row in rows:
+        status = str(row["status"] or "").lower()
+        score = float(row["score"] or 0.0)
+        if status in {"validated", "queued", "running"}:
+            return True
+        if status in {"candidate", "promising", "expand", "expanded"} and score >= strong_score:
+            return True
+        metrics = loads(row["metrics_json"], {})
+        if metrics.get("validation_passed") or metrics.get("critic_status") == "approved":
+            return True
+    return False
+
+
+def prune_weak_branches(conn, *, campaign_id: str | None = None, limit: int | None = None) -> dict[str, Any]:
+    """Remove ramos pos-reset que ja foram scoutados e nao geram resultado bom."""
+    if not _env_enabled("AETHER_WEAK_PRUNE_ENABLED", "1"):
+        return {"enabled": False, "deleted": 0, "branches": 0, "parents": 0, "skipped_live": 0}
+
+    campaign_v = campaign_id or get_active_campaign_id(conn)
+    reset_after = _ranking_reset_after(conn, campaign_v)
+    max_delete = max(1, int(limit or _env_int("AETHER_WEAK_PRUNE_MAX_PER_CYCLE", 12)))
+    min_scouts = max(1, _env_int("AETHER_WEAK_PRUNE_MIN_SCOUTS", 2))
+    stale_scouts = max(min_scouts, _env_int("AETHER_WEAK_PRUNE_STALE_SCOUTS", 3))
+    weak_score = _env_float("AETHER_WEAK_PRUNE_SCORE", 0.32)
+    strong_score = _env_float("AETHER_WEAK_PRUNE_KEEP_SCORE", EXPAND_SCORE_THRESHOLD)
+    reset_clause = "AND created_at > ?" if reset_after else ""
+    params: list[Any] = [campaign_v]
+    if reset_after:
+        params.append(reset_after)
+    params.append(max_delete * 8)
+
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM nodes
+        WHERE campaign_id=?
+          AND id != 'root'
+          AND id NOT LIKE 'tf:%'
+          AND status IN ('candidate','promising','expand','expanded')
+          {reset_clause}
+        ORDER BY score ASC, updated_at ASC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+    deleted = 0
+    branches = 0
+    skipped_live = 0
+    for row in rows:
+        if branches >= max_delete:
+            break
+        node = {key: row[key] for key in row.keys()}
+        metrics = loads(node.pop("metrics_json"), {})
+        scout_count = int(metrics.get("scout_count") or 0)
+        pass_count = int(metrics.get("pass_count") or 0)
+        score = float(node.get("score") or 0.0)
+        prune_reason = str(node.get("prune_reason") or "")
+        if scout_count < min_scouts and not prune_reason:
+            continue
+        weak_after_scouts = scout_count >= min_scouts and score <= weak_score
+        stale_below_expand = scout_count >= stale_scouts and score < strong_score and pass_count <= 0
+        explicit_pruned = bool(prune_reason) and score < strong_score
+        if not (weak_after_scouts or stale_below_expand or explicit_pruned):
+            continue
+        subtree = _subtree_ids(conn, str(node["id"]))
+        if _subtree_has_live_or_strong_node(conn, subtree, strong_score=strong_score):
+            skipped_live += 1
+            continue
+        reason = (
+            f"poda ativa: score={score:.2f}, scouts={scout_count}, "
+            f"passes={pass_count}, status={node.get('status')}"
+        )
+        n = _hard_delete_subtree(conn, str(node["id"]))
+        if n:
+            deleted += n
+            branches += 1
+            add_event(
+                conn,
+                type="weak_branch_pruned",
+                campaign_id=campaign_v,
+                node_id=None,
+                agent_role=node.get("agent_role") or "scorekeeper",
+                message=f"{node.get('name') or node['id']} removido: {reason}.",
+                payload={"node_id": node["id"], "deleted": n, "reason": reason},
+            )
+
+    parents_deleted = 0
+    if branches < max_delete:
+        reset_params: list[Any] = [campaign_v]
+        if reset_after:
+            reset_params.append(reset_after)
+        reset_params.append(max_delete)
+        parent_rows = conn.execute(
+            f"""
+            SELECT id, name, source_type
+            FROM nodes
+            WHERE campaign_id=?
+              AND id != 'root'
+              AND id NOT LIKE 'tf:%'
+              AND parent_id='root'
+              AND status IN ('visited','expanded')
+              AND source_type IN ('llm_agent','web_research')
+              {reset_clause}
+              AND id NOT IN (SELECT DISTINCT parent_id FROM nodes WHERE parent_id IS NOT NULL AND parent_id != '')
+            ORDER BY updated_at ASC
+            LIMIT ?
+            """,
+            reset_params,
+        ).fetchall()
+        for row in parent_rows:
+            if branches + parents_deleted >= max_delete:
+                break
+            node_id = str(row["id"])
+            n = _hard_delete_subtree(conn, node_id)
+            if not n:
+                continue
+            deleted += n
+            parents_deleted += 1
+            add_event(
+                conn,
+                type="weak_parent_pruned",
+                campaign_id=campaign_v,
+                node_id=None,
+                agent_role="archivist_agent",
+                message=f"{row['name'] or node_id} removido: sem filhos ativos apos scouts fracos.",
+                payload={"node_id": node_id, "deleted": n},
+            )
+
+    if deleted:
+        try:
+            conn.execute("DELETE FROM node_embeddings WHERE node_id NOT IN (SELECT id FROM nodes)")
+            conn.commit()
+        except Exception:
+            pass
+
+    return {
+        "enabled": True,
+        "deleted": deleted,
+        "branches": branches,
+        "parents": parents_deleted,
+        "skipped_live": skipped_live,
+        "reset_after": reset_after,
+    }
 
 
 def _apply_scout_result(conn, node: dict[str, Any], sweep: dict[str, Any]) -> None:
