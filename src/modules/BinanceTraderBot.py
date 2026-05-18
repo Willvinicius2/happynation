@@ -1467,18 +1467,30 @@ class BinanceTraderBot:
         # Lock inter-processo (filelock) + lock intra-processo + atomic flush.
         from src.modules.FileLock import file_lock
         lock_path = DB_TRAILING + ".lock"
+        payload = {
+            "operation_code": self.operation_code,
+            "max_price_since_buy": self.max_price_since_buy,
+            "trailing_stop_price": self.trailing_stop_price,
+            "last_buy_price_for_trailing": getattr(self, "last_buy_price_for_trailing", 0.0),
+            "trailing_is_running": self.trailing_is_running,  # Estado real do trailing
+            "last_buy_time": self.last_buy_time.isoformat() if self.last_buy_time is not None else None,
+        }
         with file_lock(lock_path, timeout=10.0), _TRAILING_DB_LOCK:
-            self.trailing_table.upsert(
-                {
-                    "operation_code": self.operation_code,
-                    "max_price_since_buy": self.max_price_since_buy,
-                    "trailing_stop_price": self.trailing_stop_price,
-                    "last_buy_price_for_trailing": getattr(self, "last_buy_price_for_trailing", 0.0),
-                    "trailing_is_running": self.trailing_is_running,  # Estado real do trailing
-                    "last_buy_time": self.last_buy_time.isoformat() if self.last_buy_time is not None else None,
-                },
-                Trailing.operation_code == self.operation_code,
-            )
+            try:
+                self.trailing_table.upsert(payload, Trailing.operation_code == self.operation_code)
+            except ValueError:
+                # "Document with ID N already exists": cache do TinyDB dessincronizou
+                # com o arquivo (outro processo/thread escreveu). Limpa cache, remove o
+                # registro antigo deste operation_code e re-insere. Idempotente.
+                try:
+                    self.trailing_table.clear_cache()
+                except Exception:
+                    pass
+                try:
+                    self.trailing_table.remove(Trailing.operation_code == self.operation_code)
+                except Exception:
+                    pass
+                self.trailing_table.insert(payload)
             # fsync no arquivo TinyDB para reduzir janela de perda em kill -9.
             try:
                 self.db.storage.flush()  # type: ignore[attr-defined]

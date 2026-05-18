@@ -77,7 +77,7 @@ ALLOWED_ASSETS = _env_csv_set("AETHER_DEPLOY_ALLOWED_ASSETS", "BTCUSDT,ETHUSDT,S
 ALLOWED_TIMEFRAMES = _env_csv_set("AETHER_DEPLOY_ALLOWED_TIMEFRAMES", "1H")
 
 # Maximo total deployado.
-DEPLOY_TOP_N = _env_int("AETHER_DEPLOY_TOP_N", 80)
+DEPLOY_TOP_N = _env_int("AETHER_DEPLOY_TOP_N", 250)
 
 # Default risk se nao houver no node.
 # TP 10% deixa o trail decidir a saida na maioria dos casos: ele reage ao
@@ -148,20 +148,53 @@ def _validated_nodes(conn: sqlite3.Connection) -> list[tuple[sqlite3.Row, dict]]
             metrics = json.loads(row["metrics_json"] or "{}")
         except json.JSONDecodeError:
             continue
-        if metrics.get("validation_passed") is not True:
+        stage = str(metrics.get("validation_stage") or metrics.get("validation_level") or "").lower()
+        if metrics.get("validation_passed") is not True and stage not in {
+            "deep",
+            "walk_forward",
+            "portfolio_validated",
+            "paper_manifest",
+        }:
             continue
         out.append((row, metrics))
     return out
 
 
+def _pick_metric(metrics: dict, *keys: str):
+    for key in keys:
+        if metrics.get(key) is not None:
+            return metrics.get(key)
+    for container in (metrics.get("last_scout"), metrics.get("best_probe")):
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            if container.get(key) is not None:
+                return container.get(key)
+    return None
+
+
+def _as_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_int(value, default: int = 0) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
 def _passes_deploy_gates(metrics: dict, score: float) -> bool:
-    if float(metrics.get("pnl_pct") or 0) < MIN_PNL_PCT:
+    if _as_float(_pick_metric(metrics, "pnl_pct", "oos_pnl_pct", "return_pct")) < MIN_PNL_PCT:
         return False
-    if int(metrics.get("trade_count") or 0) < MIN_TRADES:
+    if _as_int(_pick_metric(metrics, "trade_count", "trades", "oos_trades")) < MIN_TRADES:
         return False
     if score < MIN_SCORE:
         return False
-    if float(metrics.get("mdd_pct") or 0) > MAX_MDD_PCT:
+    if _as_float(_pick_metric(metrics, "mdd_pct", "oos_mdd_pct")) > MAX_MDD_PCT:
         return False
     # Critic gate configuravel: 'approved' exige aprovacao explicita;
     # 'any' aceita pending/sem critic mas ainda bloqueia rejected.
@@ -213,10 +246,10 @@ def _record_for(row: sqlite3.Row, metrics: dict) -> dict | None:
         "risk": dict(DEFAULT_RISK),
         "summary": {
             "name": row["name"],
-            "pnl_pct": metrics.get("pnl_pct"),
-            "sharpe": metrics.get("sharpe"),
-            "mdd_pct": metrics.get("mdd_pct"),
-            "trade_count": metrics.get("trade_count"),
+            "pnl_pct": _pick_metric(metrics, "pnl_pct", "oos_pnl_pct", "return_pct"),
+            "sharpe": _pick_metric(metrics, "sharpe", "oos_sharpe"),
+            "mdd_pct": _pick_metric(metrics, "mdd_pct", "oos_mdd_pct"),
+            "trade_count": _pick_metric(metrics, "trade_count", "trades", "oos_trades"),
             "hit_rate": best.get("hit_rate"),
             "validation_passed": bool(metrics.get("validation_passed")),
             "validation_stage": metrics.get("validation_stage"),
@@ -258,20 +291,46 @@ def _asset_family_tf_key(rec: dict) -> str:
 def _functional_fingerprint(rec: dict) -> tuple:
     """Identidade pelo *resultado* do backtest, nao pelos params.
 
-    Dois records com params diferentes mas que produziram exatamente o mesmo
-    pnl/trades/mdd/hit em (asset, timeframe) sao clones funcionais — params
-    triviais que nao alteram o sinal. O dedupe por params byte-a-byte deixa
-    passar; este funcional pega.
+    Granularidade ajustada pra valor inteiro de pnl/mdd (1 casa decimal):
+    pnl=23.6 e pnl=23.3 antes geravam fingerprints distintos e ambos passavam.
+    Agora 23.6 e 23.7 colidem — mantem o de maior score e descarta o irmao
+    que difere por ruido de backtest, nao por edge real.
     """
     summary = rec.get("summary") or {}
     return (
         rec.get("asset"),
         rec.get("timeframe"),
-        round(float(summary.get("pnl_pct") or 0.0), 2),
+        round(float(summary.get("pnl_pct") or 0.0), 1),
         int(summary.get("trade_count") or 0),
-        round(float(summary.get("mdd_pct") or 0.0), 2),
-        round(float(summary.get("hit_rate") or 0.0), 4),
+        round(float(summary.get("mdd_pct") or 0.0), 1),
+        round(float(summary.get("hit_rate") or 0.0), 3),
     )
+
+
+def _record_manifest_view(rec: dict) -> str:
+    payload = dict(rec)
+    payload.pop("deployed_at", None)
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+
+def _hypothesis_base_name(rec: dict) -> str:
+    """Extrai o nome base da hipotese descartando sufixos de timeframe.
+
+    Nomes vem como "Mutacao de Zscore mean-revert em regime low-vol / 1h / 15m".
+    Cortar antes do primeiro " / " agrupa todas as variacoes de TF da MESMA
+    hipotese. Usado pra impor um cap de variacoes por hipotese+ativo.
+    """
+    summary = rec.get("summary") or {}
+    name = str(summary.get("name") or "")
+    base = name.split(" / ")[0].strip().lower()
+    return base or "?"
+
+
+# Maximo de variacoes (timeframes) da MESMA hipotese-base no MESMO ativo.
+# Default 0 = sem cap por hipotese+ativo. O ranking/critic ja filtram robustez;
+# manter este cap baixo fazia o manifest travar em poucas dezenas mesmo com
+# muito paper_ready disponivel.
+MAX_PER_HYPOTHESIS_ASSET = _env_int("AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET", 0)
 
 
 def _select_deploy_records(ranked: list[tuple[float, dict]]) -> list[tuple[float, dict]]:
@@ -279,20 +338,26 @@ def _select_deploy_records(ranked: list[tuple[float, dict]]) -> list[tuple[float
     family_counts: dict[str, int] = {}
     asset_counts: dict[str, int] = {}
     asset_family_tf_counts: dict[str, int] = {}
+    hyp_asset_counts: dict[tuple[str, str], int] = {}
     for score, rec in ranked:
         family = _family_for(rec)
         asset = _asset_for(rec)
         asset_family_tf = _asset_family_tf_key(rec)
+        hyp_key = (_hypothesis_base_name(rec), asset)
         if MAX_PER_FAMILY > 0 and family_counts.get(family, 0) >= MAX_PER_FAMILY:
             continue
         if MAX_PER_ASSET > 0 and asset_counts.get(asset, 0) >= MAX_PER_ASSET:
             continue
         if MAX_PER_ASSET_FAMILY_TF > 0 and asset_family_tf_counts.get(asset_family_tf, 0) >= MAX_PER_ASSET_FAMILY_TF:
             continue
+        # Cap de variacoes da mesma hipotese-base no mesmo ativo.
+        if MAX_PER_HYPOTHESIS_ASSET > 0 and hyp_asset_counts.get(hyp_key, 0) >= MAX_PER_HYPOTHESIS_ASSET:
+            continue
         selected.append((score, rec))
         family_counts[family] = family_counts.get(family, 0) + 1
         asset_counts[asset] = asset_counts.get(asset, 0) + 1
         asset_family_tf_counts[asset_family_tf] = asset_family_tf_counts.get(asset_family_tf, 0) + 1
+        hyp_asset_counts[hyp_key] = hyp_asset_counts.get(hyp_key, 0) + 1
         if len(selected) >= DEPLOY_TOP_N:
             break
     return selected
@@ -333,7 +398,12 @@ def run_once(log: logging.Logger) -> dict:
     deduped = _select_deploy_records(ranked)
 
     # Identifica o que precisa sair: ids do manifest atual nao mais elegiveis.
-    current_ids = {s.get("id") for s in list_active() if s.get("source") == "aether_auto_deploy"}
+    current_records = {
+        str(s.get("id")): s
+        for s in list_active()
+        if s.get("source") == "aether_auto_deploy" and s.get("id")
+    }
+    current_ids = set(current_records)
     keep_ids = {rec["id"] for _score, rec in deduped}
     removed = 0
     for old_id in current_ids - keep_ids:
@@ -341,14 +411,22 @@ def run_once(log: logging.Logger) -> dict:
             removed += 1
 
     deployed = 0
+    skipped_unchanged = 0
     for _score, rec in deduped:
-        deploy_record(rec, max_per_family=MAX_PER_FAMILY)
+        # O cap de familia ja foi aplicado em _select_deploy_records().
+        # Reaplicar dentro de deploy_record podaria tambem estrategias de
+        # outras fontes do manifest, como lotes manuais/HAPPYNATION.
+        current = current_records.get(rec["id"])
+        if current is not None and _record_manifest_view(current) == _record_manifest_view(rec):
+            skipped_unchanged += 1
+            continue
+        deploy_record(rec, max_per_family=0)
         deployed += 1
 
     log.info(
         f"deploy: candidates={len(candidates)} struct_dedupe={after_struct} "
         f"func_dropped={func_dropped} after_dedupe={len(deduped)} "
-        f"deployed={deployed} removed_stale={removed}"
+        f"deployed={deployed} skipped_unchanged={skipped_unchanged} removed_stale={removed}"
     )
     return {"deployed": deployed, "removed": removed, "candidates": len(candidates)}
 
@@ -357,7 +435,7 @@ def main() -> int:
     log = _setup_logger()
     log.info(f"auto_deploy iniciado db={db_path()} poll={POLL_SECONDS}s")
     log.info(
-        "config: min_trades=%s top_n=%s assets=%s timeframes=%s max_family=%s max_asset=%s max_asset_family_tf=%s",
+        "config: min_trades=%s top_n=%s assets=%s timeframes=%s max_family=%s max_asset=%s max_asset_family_tf=%s max_hyp_asset=%s",
         MIN_TRADES,
         DEPLOY_TOP_N,
         ",".join(sorted(ALLOWED_ASSETS)) or "*",
@@ -365,6 +443,7 @@ def main() -> int:
         MAX_PER_FAMILY,
         MAX_PER_ASSET,
         MAX_PER_ASSET_FAMILY_TF,
+        MAX_PER_HYPOTHESIS_ASSET,
     )
     while True:
         try:

@@ -12,7 +12,7 @@ from typing import Any
 from .campaign_constants import CURRENT_CAMPAIGN_ID
 from .campaigns import get_active_campaign_id
 from .config import TIMEFRAMES
-from .db import add_event
+from .db import add_event, get_setting
 from .repository import add_artifact, role_for_timeframe, upsert_node
 
 
@@ -94,6 +94,16 @@ def _scoped_id(campaign_id: str, base_id: str) -> str:
     if campaign_id == CURRENT_CAMPAIGN_ID:
         return base_id
     return f"{campaign_id}:{base_id}"
+
+
+def _ranking_reset_after(conn, campaign_id: str) -> str | None:
+    try:
+        state = get_setting(conn, f"ranking_hidden_node_ids:{campaign_id}", default={})
+    except Exception:
+        return None
+    if isinstance(state, dict) and state.get("reset_at"):
+        return str(state["reset_at"])
+    return None
 
 
 def search_web(query: str, *, max_results: int = 5, timeout: float = 8.0) -> list[dict[str, str]]:
@@ -242,6 +252,66 @@ def strategy_specs_from_sources(sources: list[dict[str, str]], *, max_specs: int
                 ],
                 "base_score": 0.6,
             }
+        elif _contains(text, "adaptive", "trailing stop", "rolling sharpe", "long-short allocation", "portfolio construction"):
+            family = "web-adaptive-trend-risk"
+            spec = {
+                "slug": family,
+                "name": "Web adaptive trend-risk scout",
+                "hypothesis": "Trend-following em cripto melhora quando momentum direcional e stop volatilidade-adaptativo sao combinados com filtro de regime.",
+                "causal_mechanism": "Papers recentes destacam momentum persistente, volatilidade regime-dependent e trailing stops dinamicos; o scout aproxima isso com ADX/MACD/Supertrend antes de validacao profunda.",
+                "engines": ["adx", "macd", "supertrend"],
+                "probe_specs": [
+                    {"engine": "adx", "params": {"period": 14, "threshold": 24, "long_only": True}},
+                    {"engine": "macd", "params": {"fast": 12, "slow": 26, "signal": 9, "long_only": True}},
+                    {"engine": "supertrend", "params": {"atr_period": 14, "atr_mult": 3.0, "long_only": True}},
+                ],
+                "base_score": 0.63,
+            }
+        elif _contains(text, "order flow", "order-flow", "order book", "order books", "microstructure", "spread", "shap", "trade features"):
+            family = "web-microstructure-flow-proxy"
+            spec = {
+                "slug": family,
+                "name": "Web microstructure flow proxy scout",
+                "hypothesis": "Padroes estaveis de microestrutura podem ser aproximados em candles por desequilibrio de volume, desvio de VWAP e quebra estrutural.",
+                "causal_mechanism": "Sem livro de ofertas completo, OBV, VWAP deviation e structure_break funcionam como proxies auditaveis de fluxo, impacto e ruptura de liquidez citados pelas fontes externas.",
+                "engines": ["obv_trend", "vwap_dev", "structure_break"],
+                "probe_specs": [
+                    {"engine": "obv_trend", "params": {"window": 34, "long_only": False}},
+                    {"engine": "vwap_dev", "params": {"window": 48, "z_threshold": 1.8, "long_only": False}},
+                    {"engine": "structure_break", "params": {"swing_lookback": 12, "confirm_bars": 2, "long_only": False}},
+                ],
+                "base_score": 0.61,
+            }
+        elif _contains(text, "sentiment", "fear & greed", "extreme fear", "extreme greed", "uncertainty", "extremity premium"):
+            family = "web-sentiment-extremity-proxy"
+            spec = {
+                "slug": family,
+                "name": "Web sentiment extremity proxy scout",
+                "hypothesis": "Regimes extremos de medo/ganancia tendem a elevar spread e incerteza; em candles isso deve aparecer como fade seletivo de fluxo esticado.",
+                "causal_mechanism": "Como o dataset atual nao tem indice de sentimento ao vivo, MFI, VWAP deviation e regime_filter atuam como proxy de fluxo extremo e volatilidade absorvida.",
+                "engines": ["mfi", "vwap_dev", "regime_filter"],
+                "probe_specs": [
+                    {"engine": "mfi", "params": {"period": 14, "oversold": 18, "overbought": 82, "long_only": False}},
+                    {"engine": "vwap_dev", "params": {"window": 72, "z_threshold": 2.0, "long_only": False}},
+                    {"engine": "regime_filter", "params": {"method": "high_vol_fade", "vol_window": 20, "vol_percentile_max": 85, "ma_window": 100, "slope_window": 30, "long_only": False}},
+                ],
+                "base_score": 0.59,
+            }
+        elif _contains(text, "genetic algorithm", "optimization", "parameter optimization", "adaptive strategy"):
+            family = "web-adaptive-parameter-sweep"
+            spec = {
+                "slug": family,
+                "name": "Web adaptive parameter sweep scout",
+                "hypothesis": "Mercados cripto nao estacionarios favorecem familias robustas em varios parametros, nao um unico ajuste fixo.",
+                "causal_mechanism": "A fonte aponta otimizacao adaptativa; o scout testa variantes simples de momentum, tendencia e compressao para identificar estabilidade antes de qualquer overfit fino.",
+                "engines": ["macd", "adx", "vol_compression"],
+                "probe_specs": [
+                    {"engine": "macd", "params": {"fast": 8, "slow": 21, "signal": 5, "long_only": False}},
+                    {"engine": "adx", "params": {"period": 14, "threshold": 28, "long_only": False}},
+                    {"engine": "vol_compression", "params": {"atr_window": 20, "percentile_window": 180, "percentile_max": 25, "breakout_window": 20, "long_only": False}},
+                ],
+                "base_score": 0.57,
+            }
         elif _contains(text, "trend", "momentum", "moving average", "ema", "macd"):
             family = "web-trend-continuation"
             spec = {
@@ -312,6 +382,7 @@ def strategy_specs_from_sources(sources: list[dict[str, str]], *, max_specs: int
 
 def create_web_hypothesis_batch(conn, *, max_new: int = 1) -> dict[str, Any]:
     campaign_id = get_active_campaign_id(conn)
+    reset_after = _ranking_reset_after(conn, campaign_id)
     add_event(
         conn,
         type="web_research_started",
@@ -326,9 +397,20 @@ def create_web_hypothesis_batch(conn, *, max_new: int = 1) -> dict[str, Any]:
 
     for spec in specs:
         source_url = spec.get("source_url", "")
-        parent_id = _scoped_id(campaign_id, f"webhyp:{spec['slug']}:{_hash(source_url or spec['name'])}")
-        if conn.execute("SELECT 1 FROM nodes WHERE id=? AND campaign_id=?", (parent_id, campaign_id)).fetchone():
-            continue
+        parent_base_id = _scoped_id(campaign_id, f"webhyp:{spec['slug']}:{_hash(source_url or spec['name'])}")
+        parent_id = parent_base_id
+        existing = conn.execute(
+            "SELECT created_at FROM nodes WHERE id=? AND campaign_id=?",
+            (parent_id, campaign_id),
+        ).fetchone()
+        if existing:
+            created_at = str(existing["created_at"] if hasattr(existing, "keys") else existing[0])
+            if reset_after and created_at <= reset_after:
+                parent_id = f"{parent_base_id}:r:{_hash(reset_after)[:6]}"
+                if conn.execute("SELECT 1 FROM nodes WHERE id=? AND campaign_id=?", (parent_id, campaign_id)).fetchone():
+                    continue
+            else:
+                continue
         base_score = float(spec.get("base_score", 0.55))
         upsert_node(
             conn,

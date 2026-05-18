@@ -2,8 +2,7 @@
 # Reduz consumo de tokens e numero de chats abertos por ciclo.
 #
 # Difs em relacao ao run_aether_stack.ps1:
-#   - hypothesis/validation/portfolio rodam em Haiku (nao Sonnet)  ~5x mais barato
-#   - reuso de sessao Claude Code aumentado de 20 -> 50 chamadas/sessao (menos chats novos)
+#   - hypothesis/validation/portfolio rodam no modelo OpenAI configurado
 #   - max_tokens por resposta cai 700 -> 400
 #   - heartbeat LLM espacado: 2 -> 5 ciclos
 #   - exploracao forcada espacada: 4 -> 8 ciclos
@@ -31,13 +30,17 @@ if (-not (Test-Path $python)) {
 $envBlock = @'
 $env:AETHER_ECONOMY_MODE = "1"
 $env:AETHER_LLM_MAX_TOKENS = "400"
-$env:AETHER_CLAUDE_SESSION_REUSE = "1"
-$env:AETHER_CLAUDE_SESSION_MAX_CALLS = "50"
+$env:AETHER_PRIMARY_LLM_PROVIDER = "openai"
+$env:AETHER_OPENAI_TRANSPORT = if ($env:AETHER_OPENAI_TRANSPORT) { $env:AETHER_OPENAI_TRANSPORT } else { "codex_cli" }
+$env:AETHER_OPENAI_MODEL = if ($env:AETHER_OPENAI_MODEL) { $env:AETHER_OPENAI_MODEL } else { "gpt-5.4-mini" }
+$env:AETHER_CODEX_CLI_TIMEOUT = if ($env:AETHER_CODEX_CLI_TIMEOUT) { $env:AETHER_CODEX_CLI_TIMEOUT } else { "300" }
+$env:AETHER_CONTEXT_BROKER = if ($env:AETHER_CONTEXT_BROKER) { $env:AETHER_CONTEXT_BROKER } else { "0" }
 $env:AETHER_LLM_HEARTBEAT_EVERY = "5"
 $env:AETHER_FORCE_EXPLORATION_EVERY = "8"
-$env:AETHER_HYPOTHESIS_MODEL = "claude-haiku-4-5-20251001"
-$env:AETHER_VALIDATION_MODEL = "claude-haiku-4-5-20251001"
-$env:AETHER_PORTFOLIO_MODEL  = "claude-haiku-4-5-20251001"
+$env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL = if ($env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL } else { "gpt-5.5" }
+$env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT = if ($env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT } else { "high" }
+$env:AETHER_OPENAI_ROLE_VALIDATION_AGENT_MODEL = $env:AETHER_OPENAI_MODEL
+$env:AETHER_OPENAI_ROLE_PORTFOLIO_AGENT_MODEL  = $env:AETHER_OPENAI_MODEL
 '@
 
 $modules = @(

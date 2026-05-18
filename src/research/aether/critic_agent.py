@@ -68,6 +68,11 @@ BOOTSTRAP_DISABLED = os.getenv("AETHER_CRITIC_BOOTSTRAP_DISABLE", "0").strip().l
 BOOTSTRAP_SAMPLES = max(100, int(os.getenv("AETHER_CRITIC_BOOTSTRAP_SAMPLES", "1000")))
 BOOTSTRAP_MIN_SHARPE_P5 = float(os.getenv("AETHER_CRITIC_BOOTSTRAP_MIN_SHARPE_P5", "-0.3"))
 
+# Gates adicionais de qualidade basica do trade set.
+CRITIC_MIN_TRADES = max(1, int(os.getenv("AETHER_CRITIC_MIN_TRADES", "30")))
+CRITIC_MIN_PROFIT_FACTOR = float(os.getenv("AETHER_CRITIC_MIN_PROFIT_FACTOR", "1.10"))
+CRITIC_MIN_EXPECTANCY_PCT = float(os.getenv("AETHER_CRITIC_MIN_EXPECTANCY_PCT", "0.02"))
+
 # Grid denso de params: varre malha NxN ao redor dos params do best_probe.
 # Detecta overfit local (1 ponto otimo cercado de fracassos).
 GRID_DISABLED = os.getenv("AETHER_CRITIC_GRID_DISABLE", "0").strip().lower() in {"1", "true", "yes"}
@@ -463,9 +468,39 @@ def _criticize(metrics: dict) -> tuple[bool, str, dict]:
         "symbol_validated": symbol,
         "timeframe": timeframe,
     }
+    dataset_id = f"binance:{symbol}:{timeframe}"
+    base_result = _backtest(engine, params, dataset_id, timeframe)
+    if base_result is None:
+        return False, "backtest base falhou (sem resultado para medir PF/expectancy)", report
+
+    base_trade_count = int(base_result.get("closed_trades") or base_result.get("trade_count") or 0)
+    base_pnl_pct = float(base_result.get("pnl_pct") or 0.0)
+    base_profit_factor = float(base_result.get("profit_factor") or 0.0)
+    base_expectancy_pct = float(base_result.get("expectancy_pct") or 0.0)
+    report["base_backtest"] = {
+        "trade_count": base_trade_count,
+        "pnl_pct": base_pnl_pct,
+        "profit_factor": base_profit_factor,
+        "expectancy_pct": base_expectancy_pct,
+        "mdd_pct": float(base_result.get("mdd_pct") or 0.0),
+        "hit_rate": base_result.get("hit_rate"),
+        "sharpe": base_result.get("sharpe"),
+    }
+    if base_trade_count < CRITIC_MIN_TRADES:
+        return False, (
+            f"base trade sample insuficiente ({base_trade_count} < {CRITIC_MIN_TRADES})"
+        ), report
+    if base_profit_factor < CRITIC_MIN_PROFIT_FACTOR:
+        return False, (
+            f"profit factor baixo ({base_profit_factor:.2f} < {CRITIC_MIN_PROFIT_FACTOR:.2f})"
+        ), report
+    if base_expectancy_pct < CRITIC_MIN_EXPECTANCY_PCT:
+        return False, (
+            f"expectancy baixo ({base_expectancy_pct:.2f}% < {CRITIC_MIN_EXPECTANCY_PCT:.2f}%)"
+        ), report
+
     alts = [s for s in ALT_SYMBOLS if s != symbol][:CROSS_SYMBOL_POOL]
     perturbed = _perturb_params(params)
-    dataset_id = f"binance:{symbol}:{timeframe}"
 
     # Tenta caminho GPU em batch unico (cross+perturb+slice numa so passada)
     gpu_bundle = _criticize_gpu_batch(
@@ -768,7 +803,8 @@ def main() -> int:
     log.info(
         "critic gates: cross_pool=%s cross_min_pass=%s cross_min_pnl=%.2f "
         "wf=%s/%s wf_min_pnl=%.2f regime_disabled=%s regime_min_pass=%s/%s regime_min_pnl=%.2f "
-        "grid_p25_min=%.2f mtf_disabled=%s bootstrap_sharpe_p5_min=%.2f",
+        "grid_p25_min=%.2f mtf_disabled=%s bootstrap_sharpe_p5_min=%.2f "
+        "base_min_trades=%s base_min_pf=%.2f base_min_expectancy=%.2f%%",
         CROSS_SYMBOL_POOL,
         CROSS_SYMBOL_MIN_PASS,
         CROSS_SYMBOL_MIN_PNL_PCT,
@@ -782,6 +818,9 @@ def main() -> int:
         GRID_MIN_P25_PNL,
         MTF_DISABLED,
         BOOTSTRAP_MIN_SHARPE_P5,
+        CRITIC_MIN_TRADES,
+        CRITIC_MIN_PROFIT_FACTOR,
+        CRITIC_MIN_EXPECTANCY_PCT,
     )
     if not DB_PATH.exists():
         log.error(f"DB nao existe: {DB_PATH}")

@@ -156,7 +156,8 @@ class AetherResearcherAgent:
             ]
 
         role_status = status.get("roles", {}).get("hypothesis_generator", {})
-        provider_status = status.get("providers", {}).get("claude", {})
+        provider_name = role_status.get("provider") or "openai"
+        provider_status = status.get("providers", {}).get(provider_name, {})
         if not role_status.get("configured") and not provider_status.get("configured"):
             return [
                 AgentFinding(
@@ -164,8 +165,8 @@ class AetherResearcherAgent:
                     display_name=self.display_name,
                     severity=AgentSeverity.INFO,
                     title="LLM do Aether nao configurado",
-                    message="Configure Claude Code para habilitar a IA do Aether.",
-                    action="Instalar e autenticar Claude Code: npm install -g @anthropic-ai/claude-code; claude.",
+                    message="Configure OpenAI para habilitar a IA do Aether.",
+                    action="Definir OPENAI_API_KEY ou autenticar o Codex CLI.",
                     metadata={"role": role_status, "provider": provider_status},
                 )
             ]
@@ -189,7 +190,7 @@ class AetherResearcherAgent:
                     severity=AgentSeverity.WARNING,
                     title="Chamada ao Aether falhou",
                     message=str(exc)[:300],
-                    action="Inspecionar logs e verificar Claude CLI.",
+                    action="Inspecionar logs e verificar OPENAI_API_KEY/Codex CLI.",
                 )
             ]
 

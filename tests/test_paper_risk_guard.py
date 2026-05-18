@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 
@@ -96,3 +98,40 @@ def test_plan_paper_buy_caps_to_position_limit_and_cash(tmp_path, monkeypatch):
     assert allowed is True
     assert qty == 2.5
     assert "ajustada" in reason
+
+
+def test_paused_strategies_refresh_existing_stats(tmp_path, monkeypatch):
+    import src.modules.PaperBalanceLogger as paper
+
+    state_json = tmp_path / "state.json"
+    monkeypatch.setattr(paper, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(paper, "TRADES_CSV", tmp_path / "trades.csv")
+    monkeypatch.setattr(paper, "STATE_JSON", state_json)
+    monkeypatch.setattr(paper, "SUMMARY_TXT", tmp_path / "summary.txt")
+    monkeypatch.setattr(paper, "AUTO_JUDGE_ENABLED", True)
+    monkeypatch.setattr(paper, "JUDGE_MAX_LOSS_STREAK", 3)
+
+    state_json.write_text(json.dumps({
+        "_meta": {
+            "strategy_stats": {
+                "Aether:bad#1": {
+                    "trades": 3,
+                    "wins": 0,
+                    "losses": 3,
+                    "pnl_usd": -6.0,
+                    "loss_streak": 3,
+                    "paused": False,
+                    "pause_reason": "",
+                }
+            },
+            "paused_strategies": {},
+        }
+    }), encoding="utf-8")
+
+    paused = paper.get_paused_strategies()
+
+    assert paused == {"Aether:bad#1": "3 perdas seguidas"}
+    refreshed = json.loads(state_json.read_text(encoding="utf-8"))
+    stats = refreshed["_meta"]["strategy_stats"]["Aether:bad#1"]
+    assert stats["paused"] is True
+    assert stats["pause_reason"] == "3 perdas seguidas"

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from src.research.aether import manifest as manifest_module
 from src.research.aether.campaign_constants import CURRENT_CAMPAIGN_ID
-from src.research.aether.db import connect, init_db
+from src.research.aether.db import connect, init_db, set_setting
 from src.research.aether.llm_hypothesis import create_llm_hypothesis_batch
 from src.research.aether.repository import upsert_node
 
@@ -235,9 +235,74 @@ def test_hypothesis_rejected_when_family_node_cap_reached(tmp_path, monkeypatch)
     assert result["rejected_family_cap"] == 1
 
 
-def test_hypothesis_multi_engine_bypasses_family_cap(tmp_path, monkeypatch):
-    """Hipoteses com mais de uma engine nao sao bloqueadas pelo cap por
-    familia, ja que representam combinacoes novas."""
+def test_hypothesis_family_cap_respects_ranking_reset(tmp_path, monkeypatch):
+    monkeypatch.setenv("AETHER_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("AETHER_DB_PATH", str(tmp_path / "aether.sqlite3"))
+    monkeypatch.setenv("AETHER_FAMILY_VALIDATED_CAP", "0")
+    monkeypatch.setenv("AETHER_FAMILY_NODE_CAP", "3")
+    monkeypatch.setenv("AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES", "0")
+    monkeypatch.setenv("AETHER_LLM_CONTEXT_RESPECT_RANKING_RESET", "1")
+
+    db = init_db(tmp_path / "aether.sqlite3")
+    with connect(db) as conn:
+        for idx in range(5):
+            upsert_node(
+                conn,
+                id=f"old-bb-{idx}",
+                campaign_id=CURRENT_CAMPAIGN_ID,
+                code=f"OBB{idx}",
+                name=f"old-bb-{idx}",
+                hypothesis="old",
+                status="candidate",
+                score=0.5,
+                priority=0.5,
+                depth=2,
+                metrics={
+                    "engines": ["bollinger"],
+                    "probe_specs": [{"engine": "bollinger", "params": {"window": 20}}],
+                },
+                tags=["engine:bollinger"],
+                source_type="llm_agent",
+            )
+        conn.execute("UPDATE nodes SET created_at='2026-05-01T00:00:00Z', updated_at='2026-05-01T00:00:00Z'")
+        set_setting(
+            conn,
+            f"ranking_hidden_node_ids:{CURRENT_CAMPAIGN_ID}",
+            {"reset_at": "2026-05-18T20:14:03Z", "hidden_node_ids": ["old-bb-0"]},
+        )
+
+        def caller(*_args, **_kwargs):
+            return {
+                "ok": True,
+                "provider": "test",
+                "model": "test",
+                "text": json.dumps(
+                    {
+                        "hypotheses": [
+                            {
+                                "slug": "bb-pos-reset",
+                                "name": "Bollinger pos reset",
+                                "hypothesis": "tese",
+                                "causal_mechanism": "mr",
+                                "engines": ["bollinger"],
+                                "probe_specs": [
+                                    {"engine": "bollinger", "params": {"window": 30, "num_std": 2.5}}
+                                ],
+                                "base_score": 0.55,
+                            }
+                        ]
+                    }
+                ),
+            }
+
+        result = create_llm_hypothesis_batch(conn, max_new=1, caller=caller)
+
+    assert result["created_hypotheses"] == 1
+    assert result["rejected_family_cap"] == 0
+
+
+def test_hypothesis_multi_engine_with_saturated_family_is_blocked(tmp_path, monkeypatch):
+    """Combos tambem respeitam cap quando carregam uma familia saturada."""
     monkeypatch.setenv("AETHER_RUNTIME_DIR", str(tmp_path))
     monkeypatch.setenv("AETHER_DB_PATH", str(tmp_path / "aether.sqlite3"))
     monkeypatch.setenv("AETHER_FAMILY_VALIDATED_CAP", "1")
@@ -276,5 +341,5 @@ def test_hypothesis_multi_engine_bypasses_family_cap(tmp_path, monkeypatch):
 
         result = create_llm_hypothesis_batch(conn, max_new=1, caller=caller, force_exploration=True)
 
-    assert result["created_hypotheses"] == 1
-    assert result["rejected_family_cap"] == 0
+    assert result["created_hypotheses"] == 0
+    assert result["rejected_family_cap"] == 1

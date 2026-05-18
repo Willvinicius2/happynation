@@ -74,7 +74,10 @@ if (-not $env:AETHER_STATE_COMPACT_METRICS) { $env:AETHER_STATE_COMPACT_METRICS 
 if (-not $env:AETHER_PRIMARY_LLM_PROVIDER) { $env:AETHER_PRIMARY_LLM_PROVIDER = "openai" }
 if (-not $env:AETHER_OPENAI_TRANSPORT) { $env:AETHER_OPENAI_TRANSPORT = "codex_cli" }
 if (-not $env:AETHER_OPENAI_MODEL) { $env:AETHER_OPENAI_MODEL = "gpt-5.4-mini" }
-if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL = "gpt-5.5" }
+# gpt-5.5 can be enabled explicitly, but the current local Codex CLI build exits
+# non-zero with that model on this machine. Default to the healthy model so the
+# research loop keeps producing hypotheses instead of opening the circuit breaker.
+if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL = "gpt-5.4-mini" }
 if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT = "high" }
 if (-not $env:AETHER_CODEX_CLI_TIMEOUT) { $env:AETHER_CODEX_CLI_TIMEOUT = "300" }
 if (-not $env:AETHER_CONTEXT_BROKER) { $env:AETHER_CONTEXT_BROKER = "0" }
@@ -104,6 +107,7 @@ $env:AETHER_CRITIC_MTF_DISABLE = if ($env:AETHER_CRITIC_MTF_DISABLE) { $env:AETH
 $env:AETHER_CRITIC_BOOTSTRAP_MIN_SHARPE_P5 = if ($env:AETHER_CRITIC_BOOTSTRAP_MIN_SHARPE_P5) { $env:AETHER_CRITIC_BOOTSTRAP_MIN_SHARPE_P5 } else { "-0.3" }
 if (-not $env:AETHER_LLM_HEARTBEAT_EVERY) { $env:AETHER_LLM_HEARTBEAT_EVERY = if ($Stack) { "2" } else { "3" } }
 if (-not $env:AETHER_FORCE_EXPLORATION_EVERY) { $env:AETHER_FORCE_EXPLORATION_EVERY = if ($Stack) { "2" } else { "4" } }
+if (-not $env:AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES) { $env:AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES = if ($Stack) { "8" } else { "15" } }
 if (-not $env:AETHER_WEB_RESEARCH_HEARTBEAT_EVERY) { $env:AETHER_WEB_RESEARCH_HEARTBEAT_EVERY = "1" }
 if (-not $env:AETHER_WEB_INFLIGHT_TOLERANCE) { $env:AETHER_WEB_INFLIGHT_TOLERANCE = "24" }
 if (-not $env:AETHER_CONTINUOUS_RESEARCH_INTERVAL_SECONDS) { $env:AETHER_CONTINUOUS_RESEARCH_INTERVAL_SECONDS = if ($Stack) { "20" } else { "25" } }

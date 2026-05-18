@@ -121,7 +121,11 @@ ROLE_TIERS: dict[str, dict[str, str]] = {
 OPENAI_ROLE_TIERS: dict[str, dict[str, str | None]] = {
     "chief_orchestrator":   {"model": "gpt-5.4-mini", "effort": "medium"},
     "hypothesis_generator": {
-        "model": os.environ.get("AETHER_RESEARCH_MODEL", "gpt-5.5"),
+        # gpt-5.5 is useful for deep research when the local Codex CLI supports
+        # it, but on this workstation the current CLI exits non-zero for that
+        # model before producing output. Keep the default on the proven transport
+        # path and allow an explicit env override when 5.5 is healthy.
+        "model": os.environ.get("AETHER_RESEARCH_MODEL", "gpt-5.4-mini"),
         "effort": os.environ.get("AETHER_RESEARCH_EFFORT", "high"),
     },
     "archivist_agent":      {"model": "gpt-5.4-mini", "effort": "low"},
