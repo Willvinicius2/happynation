@@ -12,6 +12,7 @@ import time as _time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,13 @@ def _cb_cooldown() -> float:
         return 120.0
 
 
+def _cb_auth_cooldown() -> float:
+    try:
+        return max(_cb_cooldown(), float(os.environ.get("AETHER_LLM_AUTH_COOLDOWN", "1800")))
+    except (TypeError, ValueError):
+        return max(_cb_cooldown(), 1800.0)
+
+
 def _cb_is_open(provider_name: str) -> tuple[bool, float]:
     now = _time.time()
     with _CB_LOCK:
@@ -49,6 +57,12 @@ def _cb_is_open(provider_name: str) -> tuple[bool, float]:
         if until > now:
             return True, until - now
         return False, 0.0
+
+
+def _cb_open(provider_name: str, cooldown: float) -> None:
+    now = _time.time()
+    with _CB_LOCK:
+        _CB_STATE[provider_name] = {"fails": 0.0, "open_until": now + max(10.0, cooldown)}
 
 
 def _cb_record_failure(provider_name: str) -> None:
@@ -70,25 +84,29 @@ def _provider_cb_key(provider: "LLMProvider") -> str:
     return f"{provider.name}:{provider.transport}"
 
 
-ROLE_ASSIGNMENTS = {
-    "chief_orchestrator": "claude",
-    "hypothesis_generator": "claude",
-    "archivist_agent": "claude",
-    "validation_agent": "claude",
-    "portfolio_agent": "claude",
-    "manifest_agent": "claude",
-    "infra_data_agent": "claude",
-}
+def _looks_like_auth_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return (
+        "401 unauthorized" in text
+        or "incorrect api key" in text
+        or "invalid api key" in text
+        or "invalid_api_key" in text
+    )
 
-ROLE_FALLBACKS = {
-    "chief_orchestrator": ("codex",),
-    "hypothesis_generator": ("codex",),
-    "archivist_agent": ("codex",),
-    "validation_agent": ("codex",),
-    "portfolio_agent": ("codex",),
-    "manifest_agent": ("codex",),
-    "infra_data_agent": ("codex",),
-}
+
+AETHER_ROLES = (
+    "chief_orchestrator",
+    "hypothesis_generator",
+    "archivist_agent",
+    "validation_agent",
+    "portfolio_agent",
+    "manifest_agent",
+    "infra_data_agent",
+)
+
+ROLE_ASSIGNMENTS = {role: "openai" for role in AETHER_ROLES}
+
+ROLE_FALLBACKS = {role: () for role in AETHER_ROLES}
 
 ROLE_TIERS: dict[str, dict[str, str]] = {
     "chief_orchestrator":   {"model": "claude-haiku-4-5-20251001",  "effort": "low"},
@@ -100,15 +118,20 @@ ROLE_TIERS: dict[str, dict[str, str]] = {
     "infra_data_agent":     {"model": "claude-haiku-4-5-20251001",  "effort": "low"},
 }
 
-CODEX_ROLE_TIERS: dict[str, dict[str, str | None]] = {
+OPENAI_ROLE_TIERS: dict[str, dict[str, str | None]] = {
     "chief_orchestrator":   {"model": "gpt-5.4-mini", "effort": "medium"},
-    "hypothesis_generator": {"model": "gpt-5.4-mini", "effort": "medium"},
+    "hypothesis_generator": {
+        "model": os.environ.get("AETHER_RESEARCH_MODEL", "gpt-5.5"),
+        "effort": os.environ.get("AETHER_RESEARCH_EFFORT", "high"),
+    },
     "archivist_agent":      {"model": "gpt-5.4-mini", "effort": "low"},
     "validation_agent":     {"model": "gpt-5.4-mini", "effort": "medium"},
     "portfolio_agent":      {"model": "gpt-5.4-mini", "effort": "medium"},
     "manifest_agent":       {"model": "gpt-5.4-mini", "effort": "low"},
     "infra_data_agent":     {"model": "gpt-5.4-mini", "effort": "low"},
 }
+
+CODEX_ROLE_TIERS = OPENAI_ROLE_TIERS
 
 
 def _role_tier_override(role: str) -> dict[str, str] | None:
@@ -126,12 +149,20 @@ def _role_tier_override(role: str) -> dict[str, str] | None:
 def _codex_role_tier_override(role: str) -> dict[str, str | None] | None:
     if not _env_enabled("AETHER_ECONOMY_MODE", "1"):
         return None
-    tier = CODEX_ROLE_TIERS.get(role)
+    tier = OPENAI_ROLE_TIERS.get(role)
     if not tier:
         return None
     role_upper = role.upper()
-    model = os.environ.get(f"AETHER_CODEX_ROLE_{role_upper}_MODEL") or str(tier["model"])
-    effort = os.environ.get(f"AETHER_CODEX_ROLE_{role_upper}_EFFORT") or tier.get("effort")
+    model = (
+        os.environ.get(f"AETHER_OPENAI_ROLE_{role_upper}_MODEL")
+        or os.environ.get(f"AETHER_CODEX_ROLE_{role_upper}_MODEL")
+        or str(tier["model"])
+    )
+    effort = (
+        os.environ.get(f"AETHER_OPENAI_ROLE_{role_upper}_EFFORT")
+        or os.environ.get(f"AETHER_CODEX_ROLE_{role_upper}_EFFORT")
+        or tier.get("effort")
+    )
     return {"model": model, "effort": effort}
 
 
@@ -164,6 +195,43 @@ def _env_int(name: str, default: int) -> int:
         return int(os.environ.get(name, str(default)))
     except (TypeError, ValueError):
         return default
+
+
+def _codex_cli_path() -> str | None:
+    explicit = _env("AETHER_CODEX_CLI_PATH", "AETHER_OPENAI_CLI_PATH")
+    if explicit:
+        candidate = explicit.strip().strip('"').strip("'")
+        candidate = os.path.expandvars(os.path.expanduser(candidate))
+        if Path(candidate).exists():
+            return str(Path(candidate))
+    return shutil.which("codex")
+
+
+def _provider_alias(name: str | None) -> str:
+    normalized = (name or "").strip().lower()
+    if normalized in {"codex", "openai", "openai_codex"}:
+        return "openai"
+    if normalized in {"claude", "anthropic"}:
+        return "claude"
+    return normalized or "openai"
+
+
+def _effective_role_provider_name(role: str) -> str:
+    role_upper = role.upper()
+    override = os.environ.get(f"AETHER_ROLE_{role_upper}_PROVIDER") or os.environ.get("AETHER_PRIMARY_LLM_PROVIDER")
+    return _provider_alias(override or ROLE_ASSIGNMENTS.get(role, "openai"))
+
+
+def _effective_role_fallback_names(role: str) -> tuple[str, ...]:
+    role_upper = role.upper()
+    configured = os.environ.get(f"AETHER_ROLE_{role_upper}_FALLBACKS")
+    if configured is None:
+        configured = os.environ.get("AETHER_LLM_FALLBACK_PROVIDERS")
+    if configured is not None:
+        return tuple(_provider_alias(part) for part in configured.split(",") if part.strip())
+    if _env_enabled("AETHER_CLAUDE_FALLBACK_ENABLED", "0"):
+        return ("claude",)
+    return tuple(_provider_alias(name) for name in ROLE_FALLBACKS.get(role, ()))
 
 
 _ROLE_MAX_TOKENS_DEFAULTS: dict[str, int] = {
@@ -259,7 +327,8 @@ def _forget_session(key: str) -> None:
 
 
 def _provider_for_name(name: str) -> LLMProvider:
-    if name == "claude":
+    provider_name = _provider_alias(name)
+    if provider_name == "claude":
         key = _env("AETHER_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")
         transport = os.environ.get("AETHER_CLAUDE_TRANSPORT", "claude_code").strip().lower()
         cli_path = shutil.which("claude")
@@ -277,44 +346,72 @@ def _provider_for_name(name: str) -> LLMProvider:
             transport=transport,
             cli_path=cli_path,
         )
-    transport = os.environ.get("AETHER_CODEX_TRANSPORT", "auto").strip().lower()
-    cli_path = shutil.which("codex")
-    api_enabled = _env_enabled("AETHER_OPENAI_API_FALLBACK_ENABLED")
-    key = _env("AETHER_OPENAI_API_KEY", "OPENAI_API_KEY") if api_enabled else None
+    transport = (
+        os.environ.get("AETHER_OPENAI_TRANSPORT")
+        or os.environ.get("AETHER_CODEX_TRANSPORT")
+        or "auto"
+    ).strip().lower()
+    cli_path = _codex_cli_path()
+    cli_usable = _cli_usable(cli_path) if cli_path else False
+    key = _env("AETHER_OPENAI_API_KEY", "OPENAI_API_KEY")
     if transport == "auto":
-        transport = "codex_cli" if cli_path else "api"
-    configured = bool(cli_path) if transport in {"codex_cli", "cli"} else bool(key)
-    if transport == "api" and not api_enabled:
-        configured = False
+        transport = "api" if key else "codex_cli"
+    elif transport in {"codex_cli", "cli"} and not cli_usable and key:
+        transport = "api"
+    configured = bool(cli_usable) if transport in {"codex_cli", "cli"} else bool(key)
     return LLMProvider(
-        name="codex",
-        label="Codex",
-        model=os.environ.get("AETHER_CODEX_MODEL", "gpt-5.4-mini"),
-        effort=None,
-        key_env="AETHER_OPENAI_API_FALLBACK_ENABLED=1 + AETHER_OPENAI_API_KEY|OPENAI_API_KEY",
+        name="openai",
+        label="OpenAI",
+        model=os.environ.get("AETHER_OPENAI_MODEL") or os.environ.get("AETHER_CODEX_MODEL", "gpt-5.4-mini"),
+        effort=os.environ.get("AETHER_OPENAI_EFFORT") or os.environ.get("AETHER_CODEX_EFFORT"),
+        key_env="AETHER_OPENAI_API_KEY|OPENAI_API_KEY (ou Codex CLI autenticado)",
         configured=configured,
         transport=transport,
         cli_path=cli_path,
     )
 
 
+@lru_cache(maxsize=16)
+def _cli_usable(cli_path: str | None) -> bool:
+    """True only when Windows lets Python execute the CLI shim.
+
+    WindowsApps can expose an executable in PATH while denying child-process
+    execution from Python. A plain `shutil.which` would then make the provider
+    look configured and the Aether loop would waste LLM slots on guaranteed
+    failures.
+    """
+    if not cli_path:
+        return False
+    try:
+        completed = subprocess.run(
+            [cli_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return False
+    return completed.returncode == 0
+
+
 def llm_status() -> dict[str, Any]:
-    provider_names = set(ROLE_ASSIGNMENTS.values())
-    for fallbacks in ROLE_FALLBACKS.values():
-        provider_names.update(fallbacks)
+    provider_names = {_effective_role_provider_name(role) for role in ROLE_ASSIGNMENTS}
+    for role in ROLE_ASSIGNMENTS:
+        provider_names.update(_effective_role_fallback_names(role))
     providers = {name: _provider_for_name(name) for name in sorted(provider_names)}
     roles: dict[str, Any] = {}
-    for role, provider_name in ROLE_ASSIGNMENTS.items():
+    for role in ROLE_ASSIGNMENTS:
+        provider_name = _effective_role_provider_name(role)
         primary = role_provider(role)
         fallback_providers = []
-        for fallback_name in ROLE_FALLBACKS.get(role, ()):
+        for fallback_name in _effective_role_fallback_names(role):
             fallback = _provider_for_name(fallback_name)
-            tier = _codex_role_tier_override(role) if fallback.name == "codex" else _role_tier_override(role)
+            tier = _codex_role_tier_override(role) if fallback.name == "openai" else _role_tier_override(role)
             if tier:
                 fallback = dataclasses.replace(fallback, model=tier["model"], effort=tier["effort"])
             fallback_providers.append(fallback)
         roles[role] = {
-            "provider": provider_name,
+            "provider": primary.name,
             "fallbacks": [
                 {
                     "provider": fallback.name,
@@ -334,6 +431,7 @@ def llm_status() -> dict[str, Any]:
 
     return {
         "enabled": os.environ.get("AETHER_LLM_ENABLED", "1") != "0",
+        "disabled_reason": os.environ.get("AETHER_LLM_DISABLED_REASON"),
         "economy_mode": _env_enabled("AETHER_ECONOMY_MODE", "1"),
         "providers": {
             name: {
@@ -352,7 +450,7 @@ def llm_status() -> dict[str, Any]:
 
 
 def role_provider(role: str) -> LLMProvider:
-    base = _provider_for_name(ROLE_ASSIGNMENTS.get(role, "claude"))
+    base = _provider_for_name(_effective_role_provider_name(role))
     tier = _role_tier_override(role) if base.name == "claude" else _codex_role_tier_override(role)
     if not tier:
         return base
@@ -363,9 +461,9 @@ def role_fallback_providers(role: str) -> list[LLMProvider]:
     if os.environ.get("AETHER_LLM_FALLBACK_ENABLED", "1") == "0":
         return []
     providers: list[LLMProvider] = []
-    for name in ROLE_FALLBACKS.get(role, ()):
+    for name in _effective_role_fallback_names(role):
         provider = _provider_for_name(name)
-        tier = _codex_role_tier_override(role) if provider.name == "codex" else _role_tier_override(role)
+        tier = _codex_role_tier_override(role) if provider.name == "openai" else _role_tier_override(role)
         if tier:
             provider = dataclasses.replace(provider, model=tier["model"], effort=tier["effort"])
         if provider.configured:
@@ -401,6 +499,48 @@ def _extract_openai_text(payload: dict[str, Any]) -> str:
     return "\n".join(chunks).strip()
 
 
+_OPENAI_MODEL_PRICES_PER_MTOK: dict[str, tuple[float, float, float]] = {
+    "gpt-5.5": (5.00, 0.50, 30.00),
+    "gpt-5.4": (2.50, 0.25, 15.00),
+    "gpt-5.4-mini": (0.75, 0.075, 4.50),
+    "gpt-5.4-nano": (0.20, 0.02, 1.25),
+}
+
+
+def _openai_price_for_model(model: str) -> tuple[float, float, float] | None:
+    normalized = str(model or "").strip().lower()
+    for prefix in sorted(_OPENAI_MODEL_PRICES_PER_MTOK, key=len, reverse=True):
+        if normalized == prefix or normalized.startswith(prefix + "-"):
+            return _OPENAI_MODEL_PRICES_PER_MTOK[prefix]
+    return None
+
+
+def _openai_usage_tokens(usage: dict[str, Any]) -> tuple[int, int, int]:
+    input_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+    details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
+    cached_tokens = int(details.get("cached_tokens") or 0) if isinstance(details, dict) else 0
+    cached_tokens = max(0, min(cached_tokens, input_tokens))
+    return input_tokens, cached_tokens, output_tokens
+
+
+def _estimate_openai_cost_usd(model: str, usage: dict[str, Any] | None) -> float | None:
+    if not isinstance(usage, dict):
+        return None
+    prices = _openai_price_for_model(model)
+    if not prices:
+        return None
+    input_price, cached_input_price, output_price = prices
+    input_tokens, cached_tokens, output_tokens = _openai_usage_tokens(usage)
+    uncached_tokens = max(input_tokens - cached_tokens, 0)
+    cost = (
+        uncached_tokens * input_price / 1_000_000
+        + cached_tokens * cached_input_price / 1_000_000
+        + output_tokens * output_price / 1_000_000
+    )
+    return round(cost, 6)
+
+
 def _extract_anthropic_text(payload: dict[str, Any]) -> str:
     chunks: list[str] = []
     for part in payload.get("content") or []:
@@ -433,12 +573,30 @@ def call_openai_codex(
     timeout: float = 45.0,
     provider: LLMProvider | None = None,
 ) -> str:
-    if not _env_enabled("AETHER_OPENAI_API_FALLBACK_ENABLED"):
-        raise RuntimeError("OpenAI API fallback desativado por padrao.")
+    response = _call_openai_response(
+        system=system,
+        prompt=prompt,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        provider=provider,
+    )
+    return _extract_openai_text(response)
+
+
+def _call_openai_response(
+    *,
+    system: str,
+    prompt: str,
+    max_tokens: int = 1800,
+    timeout: float = 45.0,
+    provider: LLMProvider | None = None,
+) -> dict[str, Any]:
+    if _env_enabled("AETHER_OPENAI_API_DISABLED", "0"):
+        raise RuntimeError("OpenAI API desativada por AETHER_OPENAI_API_DISABLED=1.")
     key = _env("AETHER_OPENAI_API_KEY", "OPENAI_API_KEY")
     if not key:
-        raise RuntimeError("OpenAI/Codex API key nao configurada.")
-    provider = _provider_for_name("codex")
+        raise RuntimeError("OpenAI API key nao configurada.")
+    provider = provider or _provider_for_name("openai")
     payload = {
         "model": provider.model,
         "instructions": system,
@@ -451,7 +609,7 @@ def call_openai_codex(
         payload,
         timeout,
     )
-    return _extract_openai_text(response)
+    return response
 
 
 def call_openai_codex_result(
@@ -462,15 +620,22 @@ def call_openai_codex_result(
     timeout: float = 45.0,
     provider: LLMProvider | None = None,
 ) -> dict[str, Any]:
+    provider = provider or _provider_for_name("openai")
+    response = _call_openai_response(
+        system=system,
+        prompt=prompt,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        provider=provider,
+    )
+    usage = response.get("usage") if isinstance(response.get("usage"), dict) else None
     return {
-        "text": call_openai_codex(
-            system=system,
-            prompt=prompt,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            provider=provider,
-        ),
-        "metadata": {},
+        "text": _extract_openai_text(response),
+        "metadata": {
+            "id": response.get("id"),
+            "usage": usage,
+            "cost_usd": _estimate_openai_cost_usd(provider.model, usage),
+        },
     }
 
 
@@ -482,10 +647,11 @@ def call_codex_cli_result(
     timeout: float = 120.0,
     provider: LLMProvider | None = None,
 ) -> dict[str, Any]:
-    cli = shutil.which("codex")
+    provider = provider or _provider_for_name("codex")
+    cli = provider.cli_path or _codex_cli_path()
     if not cli:
         raise RuntimeError("Codex CLI nao encontrado.")
-    provider = provider or _provider_for_name("codex")
+    timeout = max(timeout, float(_env_int("AETHER_CODEX_CLI_TIMEOUT", 300)))
     full_prompt = (
         "Siga as instrucoes do sistema e responda somente o conteudo final solicitado.\n\n"
         f"SISTEMA:\n{system}\n\n"
@@ -505,13 +671,14 @@ def call_codex_cli_result(
             provider.model,
             "-o",
             output_path,
-            full_prompt,
+            "-",
         ]
         child_env = os.environ.copy()
         child_env.pop("AETHER_OPENAI_API_KEY", None)
         child_env.pop("OPENAI_API_KEY", None)
         completed = subprocess.run(
             args,
+            input=full_prompt,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -790,8 +957,8 @@ def call_llm_agent(role: str, *, system: str, prompt: str, max_tokens: int = 180
     if os.environ.get("AETHER_LLM_ENABLED", "1") == "0":
         return {"ok": False, "provider": None, "model": None, "text": "", "error": "LLM desativado por AETHER_LLM_ENABLED=0."}
     # Roteia via Context Broker quando AETHER_CONTEXT_BROKER=1.
-    # Broker mantem sessao Claude Code unica e injeta snapshot 1x por TTL,
-    # economizando tokens ao consolidar todos os papeis em um chat.
+    # Broker consolida snapshot e papeis; em transportes sem sessao ele injeta
+    # o snapshot compacto em cada chamada para preservar contexto.
     if os.environ.get("AETHER_CONTEXT_BROKER", "0").strip() in {"1", "true", "yes", "on"}:
         try:
             from .context_broker import dispatch as _broker_dispatch, is_enabled as _broker_enabled
@@ -874,7 +1041,10 @@ def call_llm_agent(role: str, *, system: str, prompt: str, max_tokens: int = 180
                 "metadata": metadata,
             }
         except Exception as exc:
-            _cb_record_failure(cb_key)
+            if _looks_like_auth_error(exc):
+                _cb_open(cb_key, _cb_auth_cooldown())
+            else:
+                _cb_record_failure(cb_key)
             errors.append(_short_provider_error(current.name, exc))
 
     return {

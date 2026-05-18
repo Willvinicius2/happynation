@@ -35,14 +35,22 @@ if (Test-Path $pidFile) {
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 
-# 2. Qualquer python.exe ainda rodando modulos do aether (caso processo orfao)
-$pythonProcs = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue
+# 2. Qualquer python.exe ainda rodando modulos do projeto (caso processo orfao)
+$pythonProcs = Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue
 foreach ($p in $pythonProcs) {
     $cmd = $p.CommandLine
-    if ($cmd -and ($cmd -match "src\.research\.aether\.")) {
+    $isProjectPython = $false
+    if ($cmd) {
+        $isProjectPython = (
+            ($cmd -match "src\.research\.aether\.") -or
+            ($cmd -match "-m\s+src\.main(\s|$)") -or
+            ($cmd -match "-m\s+src\.dashboard(\s|$)")
+        )
+    }
+    if ($isProjectPython) {
         try {
             Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
-            if (-not $Quiet) { Write-Host ("[stop] pid={0} (python aether orfao)" -f $p.ProcessId) -ForegroundColor Yellow }
+            if (-not $Quiet) { Write-Host ("[stop] pid={0} (python projeto orfao)" -f $p.ProcessId) -ForegroundColor Yellow }
             $killed++
         } catch {}
     }

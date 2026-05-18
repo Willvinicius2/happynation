@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aether / RAIO</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260506-actionmap">
+  <link rel="stylesheet" href="/static/styles.css?v=20260518-continuous-research-detail-v1">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 </head>
@@ -15,12 +15,12 @@
         <div class="mark"></div>
         <div>
           <h1>Aether<span>/RAIO</span></h1>
-          <p>Busca autonoma de estrategias / compute maximo</p>
+          <p>Busca autonoma de estrategias / somente novas no ranking</p>
         </div>
       </div>
       <div class="controls">
         <button id="treeViewBtn" style="display:none;">Arvore</button>
-        <button id="mindmapViewBtn" class="active">Mapa Mental</button>
+        <button id="mindmapViewBtn" class="active">Agentes</button>
         <button id="rankingViewBtn">Ranking</button>
         <button id="seedBtn">Seed</button>
         <button id="importBtn">Importar legado</button>
@@ -113,9 +113,9 @@
       <section id="rankingView" class="rankingView hidden">
         <div class="rankingHead">
           <div>
-            <div class="eyebrow">Ranking paper</div>
-            <h2>Estrategias prontas para teste</h2>
-            <p id="rankingSummary">Candidatas ordenadas por prontidao, score e PnL simulado.</p>
+            <div class="eyebrow">Ranking limpo</div>
+            <h2>Ranking validado do Aether</h2>
+            <p id="rankingSummary">Somente estrategias validadas e prontas para paper.</p>
           </div>
           <label>
             Campanha
@@ -131,10 +131,24 @@
           </label>
           <button id="newCampaignBtn">Nova campanha</button>
           <button id="refreshRankingBtn">Atualizar</button>
-          <button id="deployRankingBtn" class="primary">Ativar no bot</button>
+          <button id="resetRankingBtn">Limpar antigas</button>
+          <button id="deployRankingBtn" class="primary">Ativar novas no bot</button>
           <span id="deployRankingStatus" class="deployStatus"></span>
         </div>
-        <div id="rankingList" class="rankingList"></div>
+        <div class="rankingTabs" role="tablist" aria-label="Ranking e descobertas">
+          <button id="rankingTabValidated" type="button" class="active" data-ranking-tab="validated">
+            Validadas <span id="rankingTabValidatedCount">0</span>
+          </button>
+          <button id="rankingTabDiscoveries" type="button" data-ranking-tab="discoveries">
+            Descobertas <span id="rankingTabDiscoveriesCount">0</span>
+          </button>
+        </div>
+        <section id="rankingPaneValidated" class="rankingPane">
+          <div id="rankingList" class="rankingList"></div>
+        </section>
+        <section id="rankingPaneDiscoveries" class="rankingPane hidden">
+          <div id="discoveryStrip" class="discoveryStrip"></div>
+        </section>
       </section>
 
       <section id="mindmapView" class="mindmapView hidden">
@@ -157,6 +171,7 @@
           <strong id="nodeScore">0.00</strong>
         </div>
         <div class="metaGrid" id="nodeMeta"></div>
+        <div class="nodeDetails" id="nodeDetails"></div>
       </section>
 
       <section>
@@ -165,7 +180,7 @@
       </section>
 
       <section class="llmTraceWrap">
-        <div class="eyebrow">Traces Claude</div>
+        <div class="eyebrow">Traces LLM</div>
         <div id="llmTraces" class="llmTraces"></div>
       </section>
 
@@ -197,6 +212,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=20260506-actionmap"></script>
+  <script src="/static/app.js?v=20260518-continuous-research-detail-v1"></script>
 </body>
 </html>

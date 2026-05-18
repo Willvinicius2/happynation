@@ -203,6 +203,35 @@ def _deployed_records() -> list[dict[str, Any]]:
         return []
 
 
+def active_manifest_summary() -> dict[str, Any]:
+    """Resumo do manifesto que o bot realmente esta usando."""
+    records = _deployed_records()
+    source_ids: set[str] = set()
+    manual = 0
+    aether = 0
+    for rec in records:
+        source = str(rec.get("source") or "").lower()
+        identifiers = [
+            str(rec.get("id") or ""),
+            str(rec.get("source_node_id") or ""),
+            str(rec.get("node_id") or ""),
+        ]
+        if "manual" in source or any(value.startswith(("manual:", "manual-")) for value in identifiers):
+            manual += 1
+        else:
+            aether += 1
+        for key in ("source_node_id", "node_id"):
+            node_id = rec.get(key)
+            if node_id:
+                source_ids.add(str(node_id))
+    return {
+        "active_manifest_total": len(records),
+        "active_manifest_sources": len(source_ids),
+        "active_manifest_manual": manual,
+        "active_manifest_aether": aether,
+    }
+
+
 _DEPLOY_ALLOWED_ASSETS = {
     a.strip().upper()
     for a in os.environ.get("AETHER_DEPLOY_ALLOWED_ASSETS", "BTCUSDT,ETHUSDT,SOLUSDT,ADAUSDT").split(",")
@@ -253,6 +282,7 @@ def build_strategy_ranking(
     starting_capital: float = 1000.0,
     limit: int = 80,
     campaign_id: str | None = None,
+    created_after: str | None = None,
     dedupe: bool = True,
     include_deployed: bool = True,
     hide_blocked: bool = False,
@@ -269,15 +299,20 @@ def build_strategy_ranking(
     if campaign_filter != "all":
         campaign_where = "AND campaign_id=?"
         params.append(campaign_filter)
+    created_where = ""
+    if created_after:
+        created_where = "AND created_at > ?"
+        params.append(created_after)
     params.append(max(limit * 30, 600))
     rows = conn.execute(
         f"""
         SELECT id, campaign_id, code, name, status, score, priority, timeframe, agent_role,
-               result_summary, prune_reason, metrics_json, source_type, source_path, updated_at
+               result_summary, prune_reason, metrics_json, source_type, source_path, created_at, updated_at
         FROM nodes
         WHERE status='validated'
           AND id != 'root'
         {campaign_where}
+        {created_where}
         ORDER BY score DESC, priority DESC, updated_at DESC
         LIMIT ?
         """,
@@ -346,6 +381,7 @@ def build_strategy_ranking(
             "summary": row["result_summary"] or row["prune_reason"] or "",
             "source_type": row["source_type"],
             "source_path": row["source_path"],
+            "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "duplicate_count": 1,
             "deployed": is_deployed,

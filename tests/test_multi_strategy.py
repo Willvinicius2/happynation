@@ -177,3 +177,47 @@ def test_multi_strategy_respects_vote_weight(monkeypatch):
     )
 
     assert decision is None
+
+
+def test_multi_strategy_skips_dead_active_specs(monkeypatch):
+    import src.modules.PaperBalanceLogger as paper
+
+    monkeypatch.setenv("AETHER_SKIP_DEAD_STRATEGIES", "true")
+    monkeypatch.setattr(paper, "get_paused_strategies", lambda: {})
+    monkeypatch.setattr(
+        paper,
+        "get_dead_strategies",
+        lambda min_calls=1000, max_active_pct=0.1: ["AetherDead"],
+    )
+    data = pd.DataFrame({"close_price": [100, 101]})
+
+    class ActiveDead:
+        name = "AetherDead"
+        params = {}
+        needs_instance = False
+
+        @staticmethod
+        def function(stock_data, verbose=False):
+            raise AssertionError("dead strategy should not run")
+
+    class ActiveLive:
+        name = "AetherLive"
+        params = {}
+        needs_instance = False
+
+        @staticmethod
+        def function(stock_data, verbose=False):
+            return True
+
+    trader = DummyTrader()
+    decision = MultiStrategy(
+        trader,
+        stock_data=data,
+        verbose=False,
+        active_strategy_specs=[ActiveDead(), ActiveLive()],
+    )
+
+    assert decision is True
+    snapshot = trader.last_strategy_snapshot
+    assert snapshot["buy_votes"] == ["AetherLive"]
+    assert "AetherDead:sem_sinal" in snapshot["skipped_votes"]

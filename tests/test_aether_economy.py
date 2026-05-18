@@ -12,32 +12,39 @@ from src.research.aether.repository import upsert_node
 
 def test_economy_mode_uses_cheaper_default_roles(monkeypatch):
     monkeypatch.setenv("AETHER_ECONOMY_MODE", "1")
-    monkeypatch.setenv("AETHER_CLAUDE_TRANSPORT", "api")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    monkeypatch.setenv("AETHER_PRIMARY_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("AETHER_OPENAI_TRANSPORT", "api")
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.delenv("AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL", raising=False)
+    monkeypatch.delenv("AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT", raising=False)
 
     hypothesis = role_provider("hypothesis_generator")
     validator = role_provider("validation_agent")
 
-    assert "opus" not in hypothesis.model
-    assert hypothesis.effort == "low"
-    assert "opus" not in validator.model
-    assert validator.effort == "low"
+    assert hypothesis.name == "openai"
+    assert hypothesis.model == "gpt-5.5"
+    assert hypothesis.effort == "high"
+    assert validator.name == "openai"
+    assert validator.model == "gpt-5.4-mini"
+    assert validator.effort == "medium"
 
 
 def test_call_llm_agent_caps_max_tokens_in_economy(monkeypatch):
     from src.research.aether import llm_runtime
 
+    llm_runtime._CB_STATE.clear()
     captured = {}
     monkeypatch.setenv("AETHER_ECONOMY_MODE", "1")
-    monkeypatch.setenv("AETHER_LLM_MAX_TOKENS", "321")
-    monkeypatch.setenv("AETHER_CLAUDE_TRANSPORT", "api")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    monkeypatch.setenv("AETHER_ROLE_HYPOTHESIS_GENERATOR_MAX_TOKENS", "321")
+    monkeypatch.setenv("AETHER_PRIMARY_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("AETHER_OPENAI_TRANSPORT", "api")
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
 
     def fake_call(**kwargs):
         captured["max_tokens"] = kwargs["max_tokens"]
         return {"text": '{"hypotheses":[]}', "metadata": {}}
 
-    monkeypatch.setattr(llm_runtime, "call_claude_result", fake_call)
+    monkeypatch.setattr(llm_runtime, "call_openai_codex_result", fake_call)
 
     response = llm_runtime.call_llm_agent("hypothesis_generator", system="s", prompt="p", max_tokens=1800)
 
@@ -100,6 +107,41 @@ def test_llm_hypothesis_respects_cooldown_and_does_not_call_model(tmp_path, monk
 
     assert result["skipped"] == "cooldown"
     assert called["count"] == 0
+
+
+def test_web_research_empty_results_enter_backoff(tmp_path, monkeypatch):
+    from src.research.aether.orchestrator import _record_web_research_result, _web_research_backoff_state
+
+    monkeypatch.setenv("AETHER_WEB_RESEARCH_ZERO_THRESHOLD", "2")
+    monkeypatch.setenv("AETHER_WEB_RESEARCH_EMPTY_COOLDOWN_MINUTES", "15")
+    db = init_db(tmp_path / "aether.sqlite3")
+
+    with connect(db) as conn:
+        _record_web_research_result(conn, {"created_hypotheses": 0})
+        assert _web_research_backoff_state(conn)["active"] is False
+
+        _record_web_research_result(conn, {"created_hypotheses": 0})
+        state = _web_research_backoff_state(conn)
+
+    assert state["active"] is True
+    assert state["zero_count"] == 2
+    assert state["until"]
+
+
+def test_llm_hypothesis_skips_cleanly_when_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("AETHER_LLM_ENABLED", "0")
+    monkeypatch.setenv("AETHER_LLM_DISABLED_REASON", "credencial invalida")
+    db = init_db(tmp_path / "aether.sqlite3")
+
+    def caller(*args, **kwargs):
+        raise AssertionError("LLM caller should not run when disabled")
+
+    with connect(db) as conn:
+        result = create_llm_hypothesis_batch(conn, caller=caller)
+
+    assert result["skipped"] == "llm_disabled"
+    assert result["reason"] == "credencial invalida"
+    assert result["created_nodes"] == 0
 
 
 def test_claude_code_reuses_session_for_same_role_and_system(tmp_path, monkeypatch):

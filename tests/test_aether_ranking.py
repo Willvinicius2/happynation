@@ -10,7 +10,7 @@ from src.research.aether.auto_validator import run_once as run_auto_validator_on
 from src.research.aether.campaign_constants import CURRENT_CAMPAIGN_ID
 from src.research.aether.db import connect, init_db, loads
 from src.research.aether.ranking import build_strategy_ranking
-from src.research.aether.repository import upsert_node
+from src.research.aether.repository import best_candidate_nodes, upsert_node
 
 
 def _metrics(**overrides):
@@ -182,6 +182,46 @@ def test_ranking_uses_best_probe_equity_and_keeps_best_duplicate(tmp_path):
     assert rows[0]["pnl_pct"] == 9.0
 
 
+def test_ranking_created_after_filters_before_dedupe(tmp_path):
+    db = init_db(tmp_path / "aether.sqlite3")
+    shared_probe = {
+        "engine": "rsi",
+        "params": {"low": 28, "high": 72},
+        "symbol": "ETHUSDT",
+        "dataset_id": "same-window",
+        "timeframe": "15m",
+        "capital": 1000,
+        "final_equity": 1090,
+    }
+    with connect(db) as conn:
+        _node(
+            conn,
+            "old-duplicate",
+            status="validated",
+            score=0.9,
+            metrics=_metrics(best_probe=shared_probe),
+        )
+        _node(
+            conn,
+            "new-duplicate",
+            status="validated",
+            score=0.7,
+            metrics=_metrics(best_probe=shared_probe),
+        )
+        conn.execute(
+            "UPDATE nodes SET created_at=?, updated_at=? WHERE id=?",
+            ("2026-05-18T10:00:00Z", "2026-05-18T10:00:00Z", "old-duplicate"),
+        )
+        conn.execute(
+            "UPDATE nodes SET created_at=?, updated_at=? WHERE id=?",
+            ("2026-05-18T12:00:00Z", "2026-05-18T12:00:00Z", "new-duplicate"),
+        )
+
+        rows = build_strategy_ranking(conn, created_after="2026-05-18T11:00:00Z", dedupe=True)
+
+    assert [row["node_id"] for row in rows] == ["new-duplicate"]
+
+
 def test_campaign_rankable_count_counts_only_validated(tmp_path):
     db = init_db(tmp_path / "aether.sqlite3")
     with connect(db) as conn:
@@ -194,6 +234,29 @@ def test_campaign_rankable_count_counts_only_validated(tmp_path):
 
     current = next(c for c in campaigns["campaigns"] if c["id"] == CURRENT_CAMPAIGN_ID)
     assert current["rankable_count"] == 1
+
+
+def test_per_timeframe_candidate_picker_includes_1m_worker(tmp_path):
+    db = init_db(tmp_path / "aether.sqlite3")
+    with connect(db) as conn:
+        for timeframe in ("1m", "5m"):
+            upsert_node(
+                conn,
+                id=f"candidate-{timeframe}",
+                campaign_id=CURRENT_CAMPAIGN_ID,
+                code=f"C{timeframe}",
+                name=f"Candidate {timeframe}",
+                hypothesis="Teste de espalhamento por timeframe.",
+                status="candidate",
+                score=0.7,
+                priority=0.7,
+                timeframe=timeframe,
+                metrics=_metrics(),
+            )
+
+        rows = best_candidate_nodes(conn, limit=2, per_timeframe=True)
+
+    assert [row["timeframe"] for row in rows] == ["1m", "5m"]
 
 
 def test_auto_validator_marks_survivor_as_validated(tmp_path):

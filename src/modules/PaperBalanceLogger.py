@@ -64,6 +64,8 @@ def reload_config_from_env() -> dict:
     global RISK_GUARD_ENABLED, MAX_DAILY_LOSS_PCT, MAX_ASSET_DRAWDOWN_PCT
     global MAX_GLOBAL_DRAWDOWN_PCT, MAX_OPEN_POSITIONS, MAX_CONSECUTIVE_LOSSES
     global ROUNDTRIP_FEE_PCT, SLIPPAGE_PCT, MAX_POSITION_USD, MIN_POSITION_USD
+    global AUTO_JUDGE_ENABLED, JUDGE_MIN_TRADES, JUDGE_MAX_LOSS_STREAK
+    global JUDGE_MIN_WINRATE_PCT, JUDGE_MAX_DRAWDOWN_USD
     load_dotenv(override=True)
     RISK_GUARD_ENABLED = _env_bool("RISK_GUARD_ENABLED", True)
     MAX_DAILY_LOSS_PCT = _env_float("MAX_DAILY_LOSS_PCT", 1.25)
@@ -73,8 +75,13 @@ def reload_config_from_env() -> dict:
     MAX_CONSECUTIVE_LOSSES = _env_int("MAX_CONSECUTIVE_LOSSES", 2)
     ROUNDTRIP_FEE_PCT = _env_float("PAPER_ROUNDTRIP_FEE_PCT", 0.20)
     SLIPPAGE_PCT = _env_float("PAPER_SLIPPAGE_PCT", 0.02)
-    MAX_POSITION_USD = _env_float("PAPER_MAX_POSITION_USD", 250.0)
+    MAX_POSITION_USD = _env_float("PAPER_MAX_POSITION_USD", 350.0)
     MIN_POSITION_USD = _env_float("PAPER_MIN_POSITION_USD", 5.0)
+    AUTO_JUDGE_ENABLED = _env_bool("PAPER_AUTO_JUDGE_ENABLED", True)
+    JUDGE_MIN_TRADES = _env_int("PAPER_JUDGE_MIN_TRADES", 3)
+    JUDGE_MAX_LOSS_STREAK = _env_int("PAPER_JUDGE_MAX_LOSS_STREAK", 3)
+    JUDGE_MIN_WINRATE_PCT = _env_float("PAPER_JUDGE_MIN_WINRATE_PCT", 35.0)
+    JUDGE_MAX_DRAWDOWN_USD = _env_float("PAPER_JUDGE_MAX_DRAWDOWN_USD", 15.0)
     return {
         "RISK_GUARD_ENABLED": RISK_GUARD_ENABLED,
         "MAX_DAILY_LOSS_PCT": MAX_DAILY_LOSS_PCT,
@@ -86,10 +93,17 @@ def reload_config_from_env() -> dict:
         "SLIPPAGE_PCT": SLIPPAGE_PCT,
         "MAX_POSITION_USD": MAX_POSITION_USD,
         "MIN_POSITION_USD": MIN_POSITION_USD,
+        "AUTO_JUDGE_ENABLED": AUTO_JUDGE_ENABLED,
+        "JUDGE_MIN_TRADES": JUDGE_MIN_TRADES,
+        "JUDGE_MAX_LOSS_STREAK": JUDGE_MAX_LOSS_STREAK,
+        "JUDGE_MIN_WINRATE_PCT": JUDGE_MIN_WINRATE_PCT,
+        "JUDGE_MAX_DRAWDOWN_USD": JUDGE_MAX_DRAWDOWN_USD,
     }
 MAX_CONSECUTIVE_LOSSES = _env_int("MAX_CONSECUTIVE_LOSSES", 2)
-MAX_POSITION_USD = _env_float("PAPER_MAX_POSITION_USD", 250.0)
-MAX_POSITION_PCT = _env_float("PAPER_MAX_POSITION_PCT", 25.0)
+# 2026-05-11: sizing 1.5x (10%->15%). MAX_POSITION_USD 250->350 e PCT 25->32
+# pra acomodar Tier 1 ($300) sem ser capado pelo teto de sanidade.
+MAX_POSITION_USD = _env_float("PAPER_MAX_POSITION_USD", 350.0)
+MAX_POSITION_PCT = _env_float("PAPER_MAX_POSITION_PCT", 32.0)
 MAX_TOTAL_ALLOCATED_PCT = _env_float("PAPER_MAX_TOTAL_ALLOCATED_PCT", 70.0)
 MIN_CASH_RESERVE_USD = _env_float("PAPER_MIN_CASH_RESERVE_USD", 100.0)
 MIN_POSITION_USD = _env_float("PAPER_MIN_POSITION_USD", 5.0)
@@ -311,6 +325,16 @@ def _judge_strategy(meta: dict, name: str) -> None:
         paused.pop(name, None)
 
 
+def _refresh_strategy_judgements(meta: dict) -> None:
+    """Reaplica o juiz em stats ja existentes antes do ciclo consultar pausas."""
+    stats_map = meta.get("strategy_stats") or {}
+    if not isinstance(stats_map, dict):
+        return
+    for name in list(stats_map.keys()):
+        if name:
+            _judge_strategy(meta, str(name))
+
+
 def _get_asset_state(state, asset, strategy):
     _ensure_meta_state(state)
     if asset not in state:
@@ -358,7 +382,12 @@ def _ensure_balance_fields(asset_state):
 
 
 def mark_to_market(asset: str, price: float) -> None:
-    """Atualiza valor de mercado e PnL aberto da posição paper."""
+    """Atualiza valor de mercado e PnL aberto da posição paper.
+
+    Tambem rastreia o pico (max favorable excursion) e o vale (max adverse
+    excursion) de cada posicao aberta, em USD e em preco. O dashboard
+    consome esses valores na coluna Max.Pos / Max.Neg.
+    """
     with _lock:
         state = _load_state()
         if asset not in state or not state[asset].get("position"):
@@ -369,10 +398,19 @@ def mark_to_market(asset: str, price: float) -> None:
         qty = float(pos.get("qty") or 0.0)
         allocated = float(pos.get("allocated_usd") or pos.get("entry_price", 0.0) * qty)
         market_value = float(price) * qty
+        unrealized = market_value - allocated
         s["allocated_usd"] = allocated
         s["market_value"] = market_value
-        s["unrealized_pnl_usd"] = market_value - allocated
+        s["unrealized_pnl_usd"] = unrealized
         s["balance"] = float(s.get("cash_balance", 0.0)) + market_value
+        peak = pos.get("peak_unrealized_usd")
+        trough = pos.get("trough_unrealized_usd")
+        if peak is None or unrealized > float(peak):
+            pos["peak_unrealized_usd"] = unrealized
+            pos["peak_price"] = float(price)
+        if trough is None or unrealized < float(trough):
+            pos["trough_unrealized_usd"] = unrealized
+            pos["trough_price"] = float(price)
         _ensure_meta_state(state)
         _save_state(state)
 
@@ -481,7 +519,24 @@ def get_paused_strategies() -> dict[str, str]:
     with _lock:
         state = _load_state()
         meta = _ensure_meta_state(state)
-        return dict(meta.get("paused_strategies") or {})
+        before_paused = dict(meta.get("paused_strategies") or {})
+        stats_map = meta.get("strategy_stats") or {}
+        before_flags = {
+            str(name): (stats.get("paused"), stats.get("pause_reason"))
+            for name, stats in stats_map.items()
+            if isinstance(stats, dict)
+        }
+        _refresh_strategy_judgements(meta)
+        after_paused = dict(meta.get("paused_strategies") or {})
+        stats_map = meta.get("strategy_stats") or {}
+        after_flags = {
+            str(name): (stats.get("paused"), stats.get("pause_reason"))
+            for name, stats in stats_map.items()
+            if isinstance(stats, dict)
+        }
+        if after_paused != before_paused or after_flags != before_flags:
+            _save_state(state)
+        return after_paused
 
 
 MAX_STRATEGY_ACTIVITY_ENTRIES = _env_int("MAX_STRATEGY_ACTIVITY_ENTRIES", 200)
@@ -598,12 +653,19 @@ def _ensure_risk_state(asset_state):
     return risk
 
 
+_TRADE_CSV_COLS = [
+    "timestamp", "asset", "strategy", "side",
+    "price", "qty", "pnl_usd", "pnl_pct", "balance_after",
+    "entry_time", "max_pos_usd", "max_neg_usd",
+]
+
+
 def _append_trade_csv(row):
     header = not TRADES_CSV.exists()
     with open(TRADES_CSV, "a", encoding="utf-8") as f:
         if header:
-            f.write("timestamp,asset,strategy,side,price,qty,pnl_usd,pnl_pct,balance_after\n")
-        f.write(",".join(str(row[k]) for k in ["timestamp","asset","strategy","side","price","qty","pnl_usd","pnl_pct","balance_after"]) + "\n")
+            f.write(",".join(_TRADE_CSV_COLS) + "\n")
+        f.write(",".join(str(row.get(k, "")) for k in _TRADE_CSV_COLS) + "\n")
 
 
 def _write_summary_legacy_disabled(state):
@@ -723,6 +785,10 @@ def log_buy(asset: str, strategy: str, price: float, qty: float, metadata: dict 
             "entry_total_spend": total_spend,
             "entry_votes": entry_strategies,
             "vote_snapshot": vote_snapshot,
+            "peak_unrealized_usd": -cost_usd,
+            "trough_unrealized_usd": -cost_usd,
+            "peak_price": float(price),
+            "trough_price": float(price),
         }
         s["strategy"] = strategy
         s["cash_balance"] = 0.0
@@ -839,6 +905,10 @@ def log_sell(asset: str, price: float, qty: float):
         risk["last_trade_pnl_pct"] = pnl_pct
         risk["last_block_reason"] = ""
         update_strategy_performance(meta, entry_votes, pnl_usd)
+        # Snapshot dos extremos antes de zerar a posicao (alimenta CSV / dashboard)
+        peak_usd = pos.get("peak_unrealized_usd")
+        trough_usd = pos.get("trough_unrealized_usd")
+        entry_ts = pos.get("time", "")
         s["position"] = None
 
         ts = datetime.now().isoformat(timespec="seconds")
@@ -851,6 +921,9 @@ def log_sell(asset: str, price: float, qty: float):
             "price": f"{price:.6f}", "qty": f"{sell_qty:.6f}",
             "pnl_usd": f"{pnl_usd:+.2f}", "pnl_pct": f"{pnl_pct:+.3f}",
             "balance_after": f"{state['_meta']['equity']:.2f}",
+            "entry_time": entry_ts,
+            "max_pos_usd": f"{float(peak_usd):+.2f}" if peak_usd is not None else "",
+            "max_neg_usd": f"{float(trough_usd):+.2f}" if trough_usd is not None else "",
         })
         _write_summary(state)
 
@@ -1016,7 +1089,10 @@ def can_open_new_position(asset: str, strategy: str = "-") -> tuple[bool, str]:
         elif daily_pnl_pct <= -MAX_DAILY_LOSS_PCT:
             reason = f"perda diaria {daily_pnl_pct:.2f}% <= -{MAX_DAILY_LOSS_PCT:.2f}%"
         elif drawdown_pct >= MAX_ASSET_DRAWDOWN_PCT:
-            reason = f"drawdown do ativo {drawdown_pct:.2f}% >= {MAX_ASSET_DRAWDOWN_PCT:.2f}%"
+            # Nota: hoje calcula DD em cima de equity global (meta.equity /
+            # total_bankroll). Apesar do nome MAX_ASSET_DRAWDOWN_PCT, e
+            # equivalente ao MAX_GLOBAL_DRAWDOWN_PCT. Mantido por compat.
+            reason = f"drawdown global (limite ativo) {drawdown_pct:.2f}% >= {MAX_ASSET_DRAWDOWN_PCT:.2f}%"
         elif loss_seq >= MAX_CONSECUTIVE_LOSSES:
             reason = f"{loss_seq} perdas seguidas >= limite {MAX_CONSECUTIVE_LOSSES}"
 

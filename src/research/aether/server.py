@@ -4,7 +4,9 @@ import hashlib
 import json
 import os
 import socket
+import sqlite3
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import uvicorn
@@ -17,7 +19,7 @@ from .config import DEFAULT_WORKERS, LEGACY_ROOT, db_path, static_dir
 from .campaigns import create_campaign, get_active_campaign_id, list_campaigns
 from src.research.active import deploy_record
 
-from .db import add_event, connect, init_db, loads
+from .db import add_event, connect, get_setting, init_db, loads, set_setting
 from .legacy_import import import_legacy
 from .llm_hypothesis import create_llm_hypothesis_batch
 from .llm_runtime import llm_status
@@ -32,9 +34,12 @@ from .orchestrator import (
     start_cycle_background,
     stop_cycle,
 )
-from .ranking import build_strategy_ranking, ranking_summary
+from .ranking import active_manifest_summary, build_strategy_ranking, ranking_summary
 from .repository import ensure_agents, list_state, mark_agents_without_work_standby, seed_base_tree
 from .web_research import create_web_hypothesis_batch
+
+
+RANKING_RESET_PREFIX = "ranking_hidden_node_ids"
 
 
 @asynccontextmanager
@@ -59,6 +64,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def no_cache_ui(request, call_next):
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith(("/api/", "/static/")):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 app.mount("/static", StaticFiles(directory=static_dir()), name="static")
@@ -138,6 +153,15 @@ def _active_record_from_node(conn, ranking_row: dict) -> tuple[dict | None, str 
     return record, None
 
 
+def _deploy_record_uncapped(record: dict) -> dict:
+    try:
+        return deploy_record(record, max_per_family=0)
+    except TypeError as exc:
+        if "max_per_family" not in str(exc):
+            raise
+        return deploy_record(record)
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(static_dir() / "index.html")
@@ -146,10 +170,19 @@ def index() -> FileResponse:
 @app.get("/api/state")
 def api_state() -> dict:
     with connect() as conn:
-        ensure_agents(conn)
-        if not is_cycle_running():
-            mark_agents_without_work_standby(conn)
-        state = list_state(conn)
+        try:
+            ensure_agents(conn)
+            if not is_cycle_running():
+                mark_agents_without_work_standby(conn)
+        except sqlite3.OperationalError:
+            # `database is locked` em GET nao deve quebrar a UI; cycle writer
+            # vai eventualmente fazer ensure_agents no proprio fluxo. Skip silencioso.
+            pass
+        try:
+            max_nodes = int(os.environ.get("AETHER_UI_STATE_MAX_NODES", "850"))
+        except (TypeError, ValueError):
+            max_nodes = 850
+        state = list_state(conn, max_nodes=max_nodes, compact_metrics=True)
     state["runtime"] = {
         "db_path": str(db_path()),
         "legacy_root": str(LEGACY_ROOT),
@@ -165,27 +198,204 @@ def api_state() -> dict:
     return state
 
 
+def _recent_discoveries(
+    conn,
+    campaign_id: str,
+    *,
+    limit: int = 24,
+    reset_after: str | None = None,
+) -> list[dict]:
+    """Recent pipeline activity for the ranking screen.
+
+    The paper ranking only shows fully validated strategies. This companion
+    feed keeps brand-new LLM/local discoveries visible while they move through
+    scout, validation, critic and deploy gates.
+    """
+    deployed_ids = set()
+    try:
+        from src.research.active import list_active
+
+        for rec in list_active():
+            for key in ("source_node_id", "node_id"):
+                node_id = rec.get(key)
+                if node_id:
+                    deployed_ids.add(str(node_id))
+    except Exception:
+        deployed_ids = set()
+
+    params: list[object] = []
+    campaign_where = ""
+    if campaign_id != "all":
+        campaign_where = "AND campaign_id=?"
+        params.append(campaign_id)
+    reset_where = ""
+    if reset_after:
+        reset_where = "AND created_at > ?"
+        params.append(reset_after)
+    params.append(limit)
+    rows = conn.execute(
+        f"""
+        SELECT id, campaign_id, name, hypothesis, causal_mechanism,
+               mutation_from_parent, status, score, timeframe, agent_role,
+               result_summary, prune_reason, metrics_json, source_type,
+               source_path, created_at, updated_at
+        FROM nodes
+        WHERE id != 'root'
+          AND id NOT LIKE 'tf:%'
+          AND status NOT IN ('pruned', 'paused', 'archive')
+          {campaign_where}
+          {reset_where}
+        ORDER BY updated_at DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+    out: list[dict] = []
+    for row in rows:
+        metrics = loads(row["metrics_json"], {})
+        best = metrics.get("best_probe") if isinstance(metrics.get("best_probe"), dict) else {}
+        pnl_pct = metrics.get("pnl_pct")
+        if pnl_pct is None:
+            pnl_pct = best.get("pnl_pct")
+        trade_count = metrics.get("trade_count")
+        if trade_count is None:
+            trade_count = best.get("trade_count")
+        mdd_pct = metrics.get("mdd_pct")
+        if mdd_pct is None:
+            mdd_pct = best.get("mdd_pct")
+        stage = "explorando"
+        if row["status"] == "validated" and metrics.get("critic_status") == "approved":
+            stage = "critic aprovado"
+        elif row["status"] == "validated":
+            stage = "validada"
+        elif best:
+            stage = "backtest"
+        elif row["status"] in {"candidate", "visited"}:
+            stage = "scout"
+        out.append(
+            {
+                "node_id": row["id"],
+                "campaign_id": row["campaign_id"],
+                "name": row["name"],
+                "hypothesis": row["hypothesis"],
+                "causal_mechanism": row["causal_mechanism"],
+                "mutation_from_parent": row["mutation_from_parent"],
+                "status": row["status"],
+                "stage": stage,
+                "score": round(float(row["score"] or 0.0), 4),
+                "asset": str(best.get("symbol") or "").upper() or None,
+                "engine": best.get("engine"),
+                "timeframe": best.get("timeframe") or row["timeframe"],
+                "pnl_pct": round(float(pnl_pct), 4) if pnl_pct is not None else None,
+                "trade_count": int(float(trade_count)) if trade_count is not None else None,
+                "mdd_pct": round(float(mdd_pct), 4) if mdd_pct is not None else None,
+                "critic_status": metrics.get("critic_status"),
+                "source_type": row["source_type"],
+                "source_path": row["source_path"],
+                "deployed": row["id"] in deployed_ids,
+                "summary": row["result_summary"] or row["prune_reason"] or "",
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+        )
+    return out
+
+
+def _discovery_summary(rows: list[dict], *, new_only_since: str | None = None) -> dict:
+    return {
+        "recent": len(rows),
+        "openai": sum(1 for row in rows if str(row.get("source_path") or "").lower() == "openai"),
+        "with_backtest": sum(1 for row in rows if row.get("pnl_pct") is not None),
+        "validated": sum(1 for row in rows if row.get("status") == "validated"),
+        "deployed": sum(1 for row in rows if row.get("deployed")),
+        "new_only_since": new_only_since,
+    }
+
+
+def _ranking_reset_key(campaign_id: str) -> str:
+    return f"{RANKING_RESET_PREFIX}:{campaign_id}"
+
+
+def _ranking_reset_state(conn, campaign_id: str) -> dict:
+    state = get_setting(conn, _ranking_reset_key(campaign_id), default={})
+    return state if isinstance(state, dict) else {}
+
+
+def _apply_ranking_reset(conn, campaign_id: str, rows: list[dict]) -> tuple[list[dict], dict]:
+    reset = _ranking_reset_state(conn, campaign_id)
+    hidden_ids = {str(node_id) for node_id in reset.get("hidden_node_ids", []) if node_id}
+    reset_at = reset.get("reset_at")
+    if not hidden_ids and not reset_at:
+        return rows, {
+            "active": False,
+            "hidden_count": 0,
+            "reset_at": reset_at,
+            "filtered_count": 0,
+        }
+    filtered = [
+        row for row in rows
+        if str(row.get("node_id") or "") not in hidden_ids
+        and (not reset_at or str(row.get("created_at") or "") > str(reset_at))
+    ]
+    return filtered, {
+        "active": True,
+        "hidden_count": len(hidden_ids),
+        "reset_at": reset_at,
+        "filtered_count": len(rows) - len(filtered),
+    }
+
+
+def _ranking_created_after(reset: dict) -> str | None:
+    if not reset:
+        return None
+    reset_at = reset.get("reset_at")
+    return str(reset_at) if reset_at else None
+
+
 @app.get("/api/ranking")
 def api_ranking(
     capital: float = Query(default=1000.0, gt=0, le=10_000_000),
-    limit: int = Query(default=80, ge=1, le=250),
+    limit: int = Query(default=250, ge=1, le=250),
     campaign_id: str = Query(default="active"),
     dedupe: bool = Query(default=True),
     include_deployed: bool = Query(default=True),
     hide_blocked: bool = Query(default=True),
+    discoveries_limit: int = Query(default=24, ge=0, le=80),
 ) -> dict:
     with connect() as conn:
         campaign_v = get_active_campaign_id(conn) if campaign_id == "active" else campaign_id
+        reset_before = _ranking_reset_state(conn, campaign_v)
+        created_after = _ranking_created_after(reset_before)
         rows = build_strategy_ranking(
             conn,
             starting_capital=capital,
-            limit=limit,
+            limit=250,
             campaign_id=campaign_v,
+            created_after=created_after,
             dedupe=dedupe,
             include_deployed=include_deployed,
             hide_blocked=hide_blocked,
         )
+        rows, reset = _apply_ranking_reset(conn, campaign_v, rows)
+        rows = rows[:limit]
+        reset_after = _ranking_created_after(reset)
+        discoveries = _recent_discoveries(
+            conn,
+            campaign_v,
+            limit=discoveries_limit,
+            reset_after=reset_after,
+        ) if discoveries_limit else []
         campaigns = list_campaigns(conn)
+        summary = ranking_summary(rows)
+        summary.update(active_manifest_summary())
+        summary["deployed_in_ranking"] = summary.get("deployed", 0)
+        summary["active_manifest_outside_ranking"] = max(
+            0,
+            int(summary.get("active_manifest_total") or 0) - int(summary.get("deployed_in_ranking") or 0),
+        )
+        latest_ranked_at = max((str(row.get("updated_at") or "") for row in rows), default="")
+        summary["latest_ranked_at"] = latest_ranked_at or None
     return {
         "ok": True,
         "capital": capital,
@@ -194,24 +404,85 @@ def api_ranking(
         "include_deployed": include_deployed,
         "hide_blocked": hide_blocked,
         "count": len(rows),
-        "summary": ranking_summary(rows),
+        "summary": summary,
+        "ranking_reset": reset,
+        "discovery_summary": _discovery_summary(discoveries, new_only_since=reset_after),
+        "discoveries": discoveries,
         "campaigns": campaigns,
         "strategies": rows,
     }
 
 
+@app.post("/api/ranking/reset")
+def api_reset_ranking(
+    capital: float = Query(default=1000.0, gt=0, le=10_000_000),
+    campaign_id: str = Query(default="active"),
+    dedupe: bool = Query(default=True),
+) -> dict:
+    with connect() as conn:
+        campaign_v = get_active_campaign_id(conn) if campaign_id == "active" else campaign_id
+        rows = build_strategy_ranking(
+            conn,
+            starting_capital=capital,
+            limit=250,
+            campaign_id=campaign_v,
+            dedupe=dedupe,
+            include_deployed=True,
+            hide_blocked=False,
+        )
+        hidden_ids = sorted({str(row.get("node_id")) for row in rows if row.get("node_id")})
+        payload = {
+            "reset_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "hidden_node_ids": hidden_ids,
+            "hidden_count": len(hidden_ids),
+        }
+        set_setting(conn, _ranking_reset_key(campaign_v), payload)
+        add_event(
+            conn,
+            type="ranking_reset",
+            agent_role="manifest_agent",
+            message=f"Ranking visual zerado: {len(hidden_ids)} estrategias antigas ocultas.",
+            payload={"campaign_id": campaign_v, "hidden_count": len(hidden_ids)},
+        )
+    return {"ok": True, "campaign_id": campaign_v, **payload}
+
+
+@app.delete("/api/ranking/reset")
+def api_clear_ranking_reset(campaign_id: str = Query(default="active")) -> dict:
+    with connect() as conn:
+        campaign_v = get_active_campaign_id(conn) if campaign_id == "active" else campaign_id
+        set_setting(conn, _ranking_reset_key(campaign_v), {})
+        add_event(
+            conn,
+            type="ranking_reset_cleared",
+            agent_role="manifest_agent",
+            message="Filtro de reset do ranking removido.",
+            payload={"campaign_id": campaign_v},
+        )
+    return {"ok": True, "campaign_id": campaign_v}
+
+
 @app.post("/api/ranking/deploy")
 def api_deploy_ranking(
     capital: float = Query(default=1000.0, gt=0, le=10_000_000),
-    limit: int = Query(default=120, ge=1, le=250),
+    limit: int = Query(default=250, ge=1, le=250),
     campaign_id: str = Query(default="active"),
-    max_deploy: int = Query(default=8, ge=1, le=50),
+    max_deploy: int = Query(default=50, ge=1, le=150),
     include_needs_validation: bool = Query(default=False),
     dedupe: bool = Query(default=True),
 ) -> dict:
     with connect() as conn:
         campaign_v = get_active_campaign_id(conn) if campaign_id == "active" else campaign_id
-        rows = build_strategy_ranking(conn, starting_capital=capital, limit=limit, campaign_id=campaign_v, dedupe=dedupe)
+        reset_before = _ranking_reset_state(conn, campaign_v)
+        rows = build_strategy_ranking(
+            conn,
+            starting_capital=capital,
+            limit=limit,
+            campaign_id=campaign_v,
+            created_after=_ranking_created_after(reset_before),
+            dedupe=dedupe,
+        )
+        rows, reset = _apply_ranking_reset(conn, campaign_v, rows)
         allowed = {"paper_ready"}
         eligible = [row for row in rows if row.get("readiness") in allowed][:max_deploy]
         deployed = []
@@ -221,7 +492,7 @@ def api_deploy_ranking(
             if reason or record is None:
                 skipped.append({"node_id": ranking_row.get("node_id"), "reason": reason or "registro invalido"})
                 continue
-            deployed.append(deploy_record(record))
+            deployed.append(_deploy_record_uncapped(record))
         add_event(
             conn,
             type="ranking_deployed",
@@ -232,11 +503,13 @@ def api_deploy_ranking(
                 "deployed": len(deployed),
                 "skipped": skipped,
                 "include_needs_validation": include_needs_validation,
+                "ranking_reset": reset,
             },
         )
     return {
         "ok": True,
         "campaign_id": campaign_v,
+        "ranking_reset": reset,
         "deployed_count": len(deployed),
         "skipped_count": len(skipped),
         "deployed": deployed,
@@ -299,544 +572,7 @@ def api_mindmap() -> dict:
         return {"ok": True, "mermaid": "\n".join(lines)}
 
 
-def _build_agents_action_graph(limit_per_agent: int) -> dict:
-    """Build the live action map used by /api/agents_graph."""
-    from collections import Counter
-    import html
-
-    agent_colors = {
-        "chief_orchestrator": "#fbbf24",
-        "hypothesis_generator": "#f59e0b",
-        "scorekeeper": "#22c55e",
-        "validation_agent": "#10b981",
-        "auto_validator": "#10b981",
-        "critic_agent": "#a78bfa",
-        "hyper_agent": "#06b6d4",
-        "auto_deploy": "#3b82f6",
-        "drift_agent": "#ef4444",
-        "market_regime_agent": "#84cc16",
-        "policy_agent": "#ec4899",
-        "archivist_agent": "#94a3b8",
-        "manifest_agent": "#fbbf24",
-        "infra_data_agent": "#64748b",
-        "portfolio_agent": "#14b8a6",
-        "agent_1m_micro": "#22d3ee",
-        "agent_5m_scalp": "#34d399",
-        "agent_15m": "#60a5fa",
-        "agent_1h": "#fbbf24",
-        "agent_4h": "#f472b6",
-        "agent_1d": "#c084fc",
-    }
-    display_names = {
-        "chief_orchestrator": "Chief",
-        "hypothesis_generator": "Hypothesis",
-        "scorekeeper": "Score",
-        "validation_agent": "Validator",
-        "auto_validator": "Validator",
-        "critic_agent": "Critic v4",
-        "hyper_agent": "Hyper",
-        "auto_deploy": "Deploy",
-        "drift_agent": "Drift",
-        "market_regime_agent": "Regime",
-        "policy_agent": "Policy",
-        "archivist_agent": "Archivist",
-        "manifest_agent": "Manifest",
-        "infra_data_agent": "InfraData",
-        "portfolio_agent": "Portfolio",
-        "agent_1m_micro": "1m Micro",
-        "agent_5m_scalp": "5m Scalp",
-        "agent_15m": "15m",
-        "agent_1h": "1h",
-        "agent_4h": "4h",
-        "agent_1d": "1d",
-    }
-    phases = {
-        "control": ("Controle", "#fbbf24"),
-        "research": ("Pesquisa", "#f59e0b"),
-        "testing": ("Testes", "#5dd39e"),
-        "validation": ("Validacao", "#10b981"),
-        "critic": ("Critic", "#a78bfa"),
-        "deploy": ("Deploy", "#3b82f6"),
-        "portfolio": ("Portfolio", "#14b8a6"),
-        "risk": ("Risco", "#ef4444"),
-        "infra": ("Infra", "#64748b"),
-        "archive": ("Arquivo", "#94a3b8"),
-    }
-
-    nodes: list[dict] = []
-    edges: list[dict] = []
-    node_by_id: dict[str, dict] = {}
-    edge_seen: set[tuple[str, str, str, bool]] = set()
-
-    def add_node(node_id: str, label: str, **kwargs):
-        item = {"id": node_id, "label": label, **kwargs}
-        current = node_by_id.get(node_id)
-        if current:
-            current.update({k: v for k, v in item.items() if v is not None})
-            return current
-        node_by_id[node_id] = item
-        nodes.append(item)
-        return item
-
-    def add_edge(source: str, target: str, **kwargs) -> None:
-        if not source or not target or source == target:
-            return
-        key = (source, target, str(kwargs.get("label") or ""), bool(kwargs.get("dashes")))
-        if key in edge_seen:
-            return
-        edge_seen.add(key)
-        edges.append({"from": source, "to": target, **kwargs})
-
-    def row_dict(row) -> dict:
-        return {key: row[key] for key in row.keys()}
-
-    def short(value, max_len: int = 36) -> str:
-        text = str(value or "").replace("\n", " ").strip()
-        return text if len(text) <= max_len else text[: max_len - 1] + "..."
-
-    def title(*lines: object) -> str:
-        return "<br>".join(html.escape(str(line)) for line in lines if line not in (None, ""))
-
-    def color_obj(background: str, border: str, highlight: str | None = None) -> dict:
-        return {
-            "background": background,
-            "border": border,
-            "highlight": {"background": highlight or background, "border": "#f8fafc"},
-        }
-
-    def phase_for(role: str, kind: str | None = None) -> str:
-        if role == "chief_orchestrator":
-            return "control"
-        if role.startswith("agent_"):
-            return "testing"
-        if role in {"hypothesis_generator", "scorekeeper"}:
-            return "research"
-        if role in {"validation_agent", "auto_validator"}:
-            return "validation"
-        if role == "critic_agent":
-            return "critic"
-        if role in {"auto_deploy", "manifest_agent"}:
-            return "deploy"
-        if role == "portfolio_agent":
-            return "portfolio"
-        if role in {"drift_agent", "market_regime_agent", "policy_agent"}:
-            return "risk"
-        if role == "archivist_agent":
-            return "archive"
-        if role == "infra_data_agent":
-            return "infra"
-        return (kind or "infra").replace("timeframe_worker", "testing")
-
-    def event_color(event_type: str) -> tuple[str, str]:
-        text = (event_type or "").lower()
-        if any(token in text for token in ("failed", "error", "rejected", "pruned", "paused")):
-            return "#311612", "#ef4444"
-        if any(token in text for token in ("started", "running", "queued")):
-            return "#10251b", "#5dd39e"
-        if any(token in text for token in ("validated", "approved", "deploy", "completed")):
-            return "#102033", "#3b82f6"
-        if "research" in text or "hypothesis" in text:
-            return "#2a2110", "#f59e0b"
-        return "#111827", "#64748b"
-
-    def agent_id(role: str) -> str:
-        return f"agent::{role}"
-
-    def phase_id(phase: str) -> str:
-        return f"phase::{phase}"
-
-    def load_node_map(conn, ids: set[str]) -> dict[str, dict]:
-        out: dict[str, dict] = {}
-        pending = {str(i) for i in ids if i}
-        while pending and len(out) < 700:
-            batch = list(pending)[:240]
-            pending.difference_update(batch)
-            placeholders = ",".join("?" for _ in batch)
-            rows = conn.execute(f"SELECT * FROM nodes WHERE id IN ({placeholders})", batch).fetchall()
-            for row in rows:
-                item = row_dict(row)
-                item["metrics"] = loads(item.pop("metrics_json"), {})
-                item["tags"] = loads(item.pop("tags_json"), [])
-                out[item["id"]] = item
-                parent = item.get("parent_id")
-                if parent and parent not in out:
-                    pending.add(parent)
-        return out
-
-    def add_strategy_node(node: dict, *, active: bool = False, queued: bool = False) -> str:
-        raw_id = str(node.get("id") or "")
-        graph_id = f"node::{raw_id}"
-        status = str(node.get("status") or "candidate")
-        score = float(node.get("score") or 0.0)
-        border = "#5dd39e" if active else "#d6a84d" if queued else "#334155"
-        background = "#10251b" if active else "#2a2110" if queued else "#0f172a"
-        line2 = " / ".join(part for part in [node.get("timeframe"), status, f"{score:.2f}"] if part)
-        add_node(
-            graph_id,
-            f"{short(node.get('name') or node.get('code') or raw_id, 30)}\n{short(line2, 30)}",
-            color=color_obj(background, border),
-            shape="box" if (active or queued) else "ellipse",
-            borderWidth=5 if active else 4 if queued else 2,
-            size=18 + min(10, int(score * 10)),
-            font={"size": 12 if active else 10, "color": "#e2e8f0", "face": "system-ui"},
-            shadow={"enabled": bool(active or queued), "color": border, "size": 24 if active else 16, "x": 0, "y": 0},
-            rawNodeId=raw_id,
-            kind="strategy",
-            active=active,
-            title=title(
-                node.get("name") or raw_id,
-                f"status={status} score={score:.3f}",
-                f"timeframe={node.get('timeframe') or '-'}",
-                node.get("hypothesis") or "",
-            ),
-        )
-        return graph_id
-
-    def add_strategy_path(node_id: str, *, active: bool = False, queued: bool = False) -> str | None:
-        if node_id not in node_map:
-            return None
-        chain = []
-        current = node_map.get(node_id)
-        safety = 0
-        while current and safety < 10:
-            chain.append(current)
-            parent_id = current.get("parent_id")
-            current = node_map.get(parent_id) if parent_id else None
-            safety += 1
-        chain.reverse()
-
-        prev = "__root__"
-        target_graph_id = None
-        for item in chain:
-            if item.get("id") == "root":
-                continue
-            is_target = item.get("id") == node_id
-            graph_id = add_strategy_node(item, active=active and is_target, queued=queued and is_target)
-            target_graph_id = graph_id
-            add_edge(
-                prev,
-                graph_id,
-                color={"color": "#5dd39e" if active else "#475569", "opacity": 0.62 if active else 0.28},
-                width=3 if active and is_target else 1,
-                dashes=not active,
-            )
-            prev = graph_id
-        return target_graph_id
-
-    add_node(
-        "__root__",
-        "Aether\nMapa de acao",
-        color=color_obj("#fbbf24", "#f8fafc", "#fde68a"),
-        size=44,
-        font={"size": 21, "color": "#111827", "face": "system-ui"},
-        shape="star",
-        borderWidth=3,
-    )
-
-    focus: list[dict] = []
-    active_graph_ids: set[str] = set()
-
-    with connect() as conn:
-        campaign_id = get_active_campaign_id(conn)
-        ensure_agents(conn)
-        agent_rows = [row_dict(r) for r in conn.execute("SELECT * FROM agents ORDER BY kind, role").fetchall()]
-        for agent in agent_rows:
-            agent["stats"] = loads(agent.pop("stats_json"), {})
-
-        task_rows = []
-        for row in conn.execute(
-            """
-            SELECT * FROM tasks
-            WHERE campaign_id=? AND status IN ('running','queued')
-            ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, priority DESC, updated_at DESC
-            LIMIT 160
-            """,
-            (campaign_id,),
-        ).fetchall():
-            item = row_dict(row)
-            item["payload"] = loads(item.pop("payload_json"), {})
-            task_rows.append(item)
-
-        run_rows = [row_dict(r) for r in conn.execute(
-            """
-            SELECT * FROM runs
-            WHERE campaign_id=? AND status='running'
-            ORDER BY started_at DESC, id DESC
-            LIMIT 80
-            """,
-            (campaign_id,),
-        ).fetchall()]
-
-        ev_rows = [row_dict(r) for r in conn.execute(
-            """
-            SELECT id, ts, type, message, agent_role, node_id, payload_json
-            FROM events
-            WHERE campaign_id=? OR campaign_id IS NULL
-            ORDER BY id DESC
-            LIMIT 1000
-            """,
-            (campaign_id,),
-        ).fetchall()]
-        for event in ev_rows:
-            event["payload"] = loads(event.pop("payload_json"), {})
-
-        by_agent: dict[str, list[dict]] = {}
-        agent_event_counts: Counter = Counter()
-        for event in ev_rows:
-            role = event.get("agent_role") or "unknown"
-            by_agent.setdefault(role, []).append(event)
-            agent_event_counts[role] += 1
-
-        known_roles = {a["role"] for a in agent_rows}
-        for role in sorted(by_agent):
-            if role not in known_roles:
-                agent_rows.append(
-                    {
-                        "role": role,
-                        "label": display_names.get(role, role.replace("_", " ").title()),
-                        "kind": "sidecar",
-                        "timeframe": None,
-                        "status": "standby",
-                        "current_task_id": None,
-                        "stats": {},
-                        "updated_at": "",
-                    }
-                )
-
-        display_events: list[dict] = []
-        for events_for_role in by_agent.values():
-            display_events.extend(events_for_role[:limit_per_agent])
-
-        node_ids = {
-            *(str(t.get("node_id")) for t in task_rows if t.get("node_id")),
-            *(str(r.get("node_id")) for r in run_rows if r.get("node_id")),
-            *(str(e.get("node_id")) for e in display_events if e.get("node_id")),
-        }
-        node_map = load_node_map(conn, node_ids)
-
-    tasks_by_id = {t["id"]: t for t in task_rows}
-    agent_rows.sort(key=lambda a: (phase_for(a.get("role", ""), a.get("kind")), a.get("role", "")))
-    phases_in_use = {phase_for(a.get("role", ""), a.get("kind")) for a in agent_rows}
-
-    for phase in sorted(phases_in_use):
-        label, color = phases.get(phase, (phase.title(), "#64748b"))
-        add_node(
-            phase_id(phase),
-            label,
-            color=color_obj("#111827", color),
-            shape="box",
-            borderWidth=2,
-            font={"size": 13, "color": "#e5e7eb", "face": "system-ui"},
-            size=20,
-        )
-        add_edge("__root__", phase_id(phase), color={"color": color, "opacity": 0.32}, width=2)
-
-    def add_agent_node(agent: dict) -> None:
-        role = agent.get("role") or "unknown"
-        status = str(agent.get("status") or "standby")
-        color = agent_colors.get(role, "#64748b")
-        active = status == "running"
-        queued = status == "queued"
-        label = display_names.get(role, agent.get("label") or short(role, 16))
-        event_count = agent_event_counts.get(role, 0)
-        phase = phase_for(role, agent.get("kind"))
-        add_node(
-            agent_id(role),
-            f"{short(label, 16)}\n{status.upper()}\n{event_count} eventos",
-            color=color_obj("#0f172a", "#f8fafc" if active else color),
-            shape="dot",
-            size=32 if active else 27 if queued else min(25, 14 + event_count // 5),
-            borderWidth=5 if active else 4 if queued else 2,
-            font={"size": 12, "color": "#f8fafc", "face": "system-ui"},
-            shadow={"enabled": bool(active or queued), "color": color, "size": 22 if active else 14, "x": 0, "y": 0},
-            kind="agent",
-            title=title(
-                agent.get("label") or role,
-                f"role={role}",
-                f"status={status}",
-                f"task={agent.get('current_task_id') or '-'}",
-                (agent.get("stats") or {}).get("bubble") or "",
-            ),
-        )
-        add_edge(phase_id(phase), agent_id(role), color={"color": color, "opacity": 0.45}, width=2 if active else 1)
-
-    for agent in agent_rows:
-        add_agent_node(agent)
-
-    handled_tasks: set[str] = set()
-    for agent in agent_rows:
-        role = agent.get("role") or "unknown"
-        status = str(agent.get("status") or "standby")
-        if status not in {"running", "queued"}:
-            continue
-        current_task_id = agent.get("current_task_id")
-        task = tasks_by_id.get(current_task_id) if current_task_id else None
-        if task:
-            handled_tasks.add(task["id"])
-        node_id = str(task.get("node_id")) if task and task.get("node_id") else None
-        stats = agent.get("stats") or {}
-        active = status == "running"
-        queued = status == "queued"
-        edge_color = "#5dd39e" if active else "#d6a84d"
-        action = task.get("task_type") if task else stats.get("phase") or current_task_id or "work"
-
-        if node_id and node_id in node_map:
-            graph_id = add_strategy_path(node_id, active=active, queued=queued)
-            if graph_id:
-                active_graph_ids.add(graph_id)
-                add_edge(
-                    agent_id(role),
-                    graph_id,
-                    color={"color": edge_color, "opacity": 0.92},
-                    width=5 if active else 3,
-                    label="testando" if task else "atuando",
-                    font={"size": 10, "color": edge_color, "face": "system-ui"},
-                )
-                target_node = node_map[node_id]
-                focus.append(
-                    {
-                        "agent": agent.get("label") or role,
-                        "role": role,
-                        "status": status,
-                        "action": action,
-                        "node": target_node.get("name") or target_node.get("code") or node_id,
-                        "node_id": node_id,
-                        "graph_node_id": graph_id,
-                        "timeframe": target_node.get("timeframe"),
-                        "detail": stats.get("bubble") or (f"{task.get('status')} {task.get('task_type')}" if task else ""),
-                    }
-                )
-        else:
-            work_id = f"work::{role}::{current_task_id or action or status}"
-            label = "Pesquisando" if "research" in str(action) else "Trabalhando"
-            add_node(
-                work_id,
-                f"{label}\n{short(action, 26)}",
-                color=color_obj("#10251b" if active else "#2a2110", edge_color),
-                shape="diamond",
-                size=24 if active else 18,
-                borderWidth=5 if active else 3,
-                font={"size": 12, "color": "#e2e8f0", "face": "system-ui"},
-                shadow={"enabled": bool(active or queued), "color": edge_color, "size": 22 if active else 14, "x": 0, "y": 0},
-                title=title(agent.get("label") or role, action, stats.get("bubble") or ""),
-            )
-            add_edge(agent_id(role), work_id, color={"color": edge_color, "opacity": 0.9}, width=5 if active else 3)
-            active_graph_ids.add(work_id)
-            focus.append(
-                {
-                    "agent": agent.get("label") or role,
-                    "role": role,
-                    "status": status,
-                    "action": action,
-                    "node": label,
-                    "node_id": None,
-                    "graph_node_id": work_id,
-                    "timeframe": agent.get("timeframe"),
-                    "detail": stats.get("bubble") or "",
-                }
-            )
-
-    for task in task_rows:
-        if task["id"] in handled_tasks:
-            continue
-        role = task.get("agent_role") or "unknown"
-        node_id = str(task.get("node_id")) if task.get("node_id") else None
-        active = task.get("status") == "running"
-        queued = task.get("status") == "queued"
-        edge_color = "#5dd39e" if active else "#d6a84d"
-        if node_id and node_id in node_map:
-            graph_id = add_strategy_path(node_id, active=active, queued=queued)
-            if graph_id:
-                add_edge(agent_id(role), graph_id, color={"color": edge_color, "opacity": 0.78}, width=4 if active else 2, dashes=queued)
-
-    for role, events_for_role in by_agent.items():
-        color = agent_colors.get(role, "#64748b")
-        type_counts = Counter(str(event.get("type") or "?") for event in events_for_role)
-        for type_name, qty in type_counts.most_common(3):
-            summary_id = f"summary::{role}::{type_name}"
-            bg, border = event_color(type_name)
-            add_node(
-                summary_id,
-                f"{short(type_name.replace('_', ' '), 22)}\nx {qty}",
-                color=color_obj(bg, border),
-                shape="dot",
-                size=9 + min(10, qty // 4),
-                font={"size": 9, "color": "#cbd5e1", "face": "system-ui"},
-                title=title(f"{qty} eventos", type_name),
-            )
-            add_edge(agent_id(role), summary_id, color={"color": color, "opacity": 0.24}, width=1, dashes=True)
-
-        for event in events_for_role[:limit_per_agent]:
-            event_type = str(event.get("type") or "?")
-            bg, border = event_color(event_type)
-            event_id = f"event::{event.get('id')}"
-            add_node(
-                event_id,
-                f"{short(event_type.replace('_', ' '), 20)}\n{short(event.get('ts'), 19)}",
-                color=color_obj(bg, border),
-                shape="dot",
-                size=10,
-                borderWidth=2,
-                font={"size": 9, "color": "#cbd5e1", "face": "system-ui"},
-                title=title(event.get("ts"), event_type, event.get("message") or ""),
-            )
-            event_node_id = str(event.get("node_id")) if event.get("node_id") else None
-            if event_node_id and event_node_id in node_map:
-                target_id = add_strategy_node(node_map[event_node_id], active=False)
-                add_edge(agent_id(role), target_id, color={"color": border, "opacity": 0.25}, width=1)
-                add_edge(target_id, event_id, color={"color": border, "opacity": 0.45}, width=1, dashes=True)
-            else:
-                add_edge(agent_id(role), event_id, color={"color": border, "opacity": 0.45}, width=1, dashes=True)
-
-    try:
-        active_file = Path("src/logs/research/active_strategies.json")
-        if active_file.exists():
-            active_payload = json.loads(active_file.read_text(encoding="utf-8-sig"))
-            strategies = active_payload.get("strategies") or []
-            if strategies:
-                if agent_id("auto_deploy") not in node_by_id:
-                    add_agent_node(
-                        {
-                            "role": "auto_deploy",
-                            "label": "Auto Deploy",
-                            "kind": "deploy",
-                            "timeframe": None,
-                            "status": "standby",
-                            "current_task_id": None,
-                            "stats": {},
-                        }
-                    )
-                for strategy in strategies[:12]:
-                    sid = f"paper::{str(strategy.get('id') or '?')[:32]}"
-                    asset = strategy.get("asset") or strategy.get("symbol") or "?"
-                    engine = strategy.get("engine") or "?"
-                    timeframe = strategy.get("timeframe") or "?"
-                    score = float(strategy.get("score") or 0.0)
-                    add_node(
-                        sid,
-                        f"{short(asset, 12)} {short(engine, 12)}\n{timeframe} / {score:.2f}",
-                        color=color_obj("#102033", "#3b82f6"),
-                        shape="box",
-                        size=14,
-                        borderWidth=2,
-                        font={"size": 10, "color": "#dbeafe", "face": "system-ui"},
-                        rawNodeId=strategy.get("source_node_id") or strategy.get("node_id"),
-                        title=title("Ativa no bot paper", strategy.get("source_node_id") or strategy.get("node_id") or ""),
-                    )
-                    add_edge(agent_id("auto_deploy"), sid, color={"color": "#3b82f6", "opacity": 0.5}, width=1, dashes=True)
-    except Exception:
-        pass
-
-    stats = {
-        "nodes": len(nodes),
-        "edges": len(edges),
-        "agents": len(agent_rows),
-        "running_agents": sum(1 for a in agent_rows if a.get("status") == "running"),
-        "queued_agents": sum(1 for a in agent_rows if a.get("status") == "queued"),
-        "active_targets": len(active_graph_ids),
-        "recent_events": sum(agent_event_counts.values()),
-    }
-    return {"ok": True, "nodes": nodes, "edges": edges, "focus": focus, "stats": stats}
+from .server_agents_graph import _build_agents_action_graph
 
 
 @app.get("/api/agents_graph")
@@ -1068,18 +804,21 @@ def api_queue_scouts(
 
 
 def _researcher_inflight(conn, source_type: str) -> int:
+    window_min = max(1, _env_int("AETHER_INFLIGHT_WINDOW_MINUTES", 30))
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=window_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
     row = conn.execute(
         """
-        SELECT COUNT(*) FROM nodes
+        SELECT COUNT(*) AS c FROM nodes
         WHERE source_type=?
           AND id != 'root'
           AND id NOT LIKE 'tf:%'
           AND status IN ('candidate','promising','expand','queued','running')
+          AND COALESCE(updated_at, created_at) >= ?
         """,
-        (source_type,),
+        (source_type, cutoff),
     ).fetchone()
     try:
-        return int(row[0])
+        return int(row["c"] if hasattr(row, "keys") else row[0])
     except (TypeError, ValueError, IndexError):
         return 0
 
@@ -1088,20 +827,32 @@ def _researcher_inflight(conn, source_type: str) -> int:
 def api_web_research(
     max_new: int = Query(default=1, ge=1, le=5),
 ) -> dict:
-    with connect() as conn:
-        ensure_agents(conn)
-        inflight = _researcher_inflight(conn, "web_research")
-        if inflight > 0:
+    try:
+        with connect() as conn:
+            ensure_agents(conn)
+            inflight = _researcher_inflight(conn, "web_research")
+            inflight_tolerance = max(0, _env_int("AETHER_WEB_INFLIGHT_TOLERANCE", 24))
+            if inflight > inflight_tolerance:
+                mark_agents_without_work_standby(conn)
+                return {
+                    "ok": False,
+                    "skipped": True,
+                    "reason": "researcher_busy",
+                    "inflight": inflight,
+                    "tolerance": inflight_tolerance,
+                    "message": f"Pesquisa web aguardando validacao ({inflight} em teste, tol={inflight_tolerance}).",
+                }
+            result = create_web_hypothesis_batch(conn, max_new=max_new)
             mark_agents_without_work_standby(conn)
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower():
             return {
                 "ok": False,
                 "skipped": True,
-                "reason": "researcher_busy",
-                "inflight": inflight,
-                "message": f"Pesquisa web aguardando validacao ({inflight} em teste).",
+                "reason": "database_locked",
+                "message": "SQLite ocupado por outro agente; tente novamente em alguns segundos.",
             }
-        result = create_web_hypothesis_batch(conn, max_new=max_new)
-        mark_agents_without_work_standby(conn)
+        raise
     return {"ok": True, **result}
 
 
@@ -1109,20 +860,32 @@ def api_web_research(
 def api_llm_research(
     max_new: int = Query(default=3, ge=1, le=5),
 ) -> dict:
-    with connect() as conn:
-        ensure_agents(conn)
-        inflight = _researcher_inflight(conn, "llm_agent")
-        if inflight > 0:
+    try:
+        with connect() as conn:
+            ensure_agents(conn)
+            inflight = _researcher_inflight(conn, "llm_agent")
+            inflight_tolerance = max(0, _env_int("AETHER_LLM_INFLIGHT_TOLERANCE", 16))
+            if inflight > inflight_tolerance:
+                mark_agents_without_work_standby(conn)
+                return {
+                    "ok": False,
+                    "skipped": True,
+                    "reason": "researcher_busy",
+                    "inflight": inflight,
+                    "tolerance": inflight_tolerance,
+                    "message": f"Agente LLM aguardando validacao ({inflight} em teste, tol={inflight_tolerance}).",
+                }
+            result = create_llm_hypothesis_batch(conn, max_new=max_new)
             mark_agents_without_work_standby(conn)
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower():
             return {
                 "ok": False,
                 "skipped": True,
-                "reason": "researcher_busy",
-                "inflight": inflight,
-                "message": f"Agente LLM aguardando validacao ({inflight} em teste).",
+                "reason": "database_locked",
+                "message": "SQLite ocupado por outro agente; tente novamente em alguns segundos.",
             }
-        result = create_llm_hypothesis_batch(conn, max_new=max_new)
-        mark_agents_without_work_standby(conn)
+        raise
     return {"ok": True, **result}
 
 
