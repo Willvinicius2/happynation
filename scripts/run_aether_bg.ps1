@@ -59,40 +59,49 @@ Import-DotEnvIfPresent (Join-Path $root ".env")
 Import-DotEnvIfPresent (Join-Path $env:LOCALAPPDATA "hermes\.env")
 
 # Variaveis herdadas
-if (-not $env:AETHER_ECONOMY_MODE)                         { $env:AETHER_ECONOMY_MODE = if ($Stack) { "0" } else { "1" } }
-if (-not $env:AETHER_LLM_MAX_TOKENS)                       { $env:AETHER_LLM_MAX_TOKENS = if ($Stack) { "700" } else { "400" } }
-if (-not $env:AETHER_LLM_MAX_NEW)                          { $env:AETHER_LLM_MAX_NEW = if ($Stack) { "6" } else { "3" } }
+$researchTurbo = $Full -or $Stack
+if (-not $env:AETHER_ECONOMY_MODE)                         { $env:AETHER_ECONOMY_MODE = if ($researchTurbo) { "0" } else { "1" } }
+if (-not $env:AETHER_LLM_MAX_TOKENS)                       { $env:AETHER_LLM_MAX_TOKENS = if ($researchTurbo) { "900" } else { "400" } }
+if (-not $env:AETHER_LLM_MAX_NEW)                          { $env:AETHER_LLM_MAX_NEW = if ($researchTurbo) { "3" } else { "3" } }
+if (-not $env:AETHER_LLM_MAX_NEW_HARD_CAP)                 { $env:AETHER_LLM_MAX_NEW_HARD_CAP = if ($researchTurbo) { "5" } else { "5" } }
+if (-not $env:AETHER_LLM_HEARTBEAT_BATCH)                  { $env:AETHER_LLM_HEARTBEAT_BATCH = if ($researchTurbo) { "3" } else { "2" } }
 # Tier A: defaults sobem pra 4000 mas guards respeitam env ja seteado pelo stack wrapper.
-if (-not $env:AETHER_HYPOTHESIS_MAX_TOKENS)                { $env:AETHER_HYPOTHESIS_MAX_TOKENS = if ($Stack) { "4000" } else { "1100" } }
-if (-not $env:AETHER_ROLE_HYPOTHESIS_GENERATOR_MAX_TOKENS) { $env:AETHER_ROLE_HYPOTHESIS_GENERATOR_MAX_TOKENS = if ($Stack) { "4000" } else { "1100" } }
-$env:AETHER_ADAPTIVE_TASK_BATCH = "1"
-$env:AETHER_TASKS_PER_WORKER = "2"
-$env:AETHER_TARGET_PROBES_PER_WORKER = "6"
-$env:AETHER_SCOUT_CANDIDATE_SCAN_LIMIT = "120"
+if (-not $env:AETHER_HYPOTHESIS_MAX_TOKENS)                { $env:AETHER_HYPOTHESIS_MAX_TOKENS = if ($researchTurbo) { "3500" } else { "1100" } }
+if (-not $env:AETHER_ROLE_HYPOTHESIS_GENERATOR_MAX_TOKENS) { $env:AETHER_ROLE_HYPOTHESIS_GENERATOR_MAX_TOKENS = if ($researchTurbo) { "3500" } else { "1100" } }
+if (-not $env:AETHER_ADAPTIVE_TASK_BATCH)                  { $env:AETHER_ADAPTIVE_TASK_BATCH = "1" }
+if (-not $env:AETHER_TASKS_PER_WORKER)                     { $env:AETHER_TASKS_PER_WORKER = if ($researchTurbo) { "3" } else { "2" } }
+if (-not $env:AETHER_TARGET_PROBES_PER_WORKER)             { $env:AETHER_TARGET_PROBES_PER_WORKER = if ($researchTurbo) { "12" } else { "6" } }
+if (-not $env:AETHER_SCOUT_CANDIDATE_SCAN_LIMIT)           { $env:AETHER_SCOUT_CANDIDATE_SCAN_LIMIT = if ($researchTurbo) { "240" } else { "120" } }
+if (-not $env:AETHER_LIMIT_NODES_CAP)                      { $env:AETHER_LIMIT_NODES_CAP = if ($researchTurbo) { "36" } else { "25" } }
+if (-not $env:AETHER_FAMILY_NODE_CAP)                      { $env:AETHER_FAMILY_NODE_CAP = if ($researchTurbo) { "24" } else { "8" } }
+if (-not $env:AETHER_FAMILY_VALIDATED_CAP)                 { $env:AETHER_FAMILY_VALIDATED_CAP = if ($researchTurbo) { "8" } else { "4" } }
+if (-not $env:AETHER_INFLIGHT_WINDOW_MINUTES)              { $env:AETHER_INFLIGHT_WINDOW_MINUTES = if ($researchTurbo) { "12" } else { "30" } }
 if (-not $env:AETHER_UI_STATE_MAX_NODES) { $env:AETHER_UI_STATE_MAX_NODES = "850" }
 if (-not $env:AETHER_STATE_COMPACT_METRICS) { $env:AETHER_STATE_COMPACT_METRICS = "1" }
 if (-not $env:AETHER_PRIMARY_LLM_PROVIDER) { $env:AETHER_PRIMARY_LLM_PROVIDER = "openai" }
 if (-not $env:AETHER_OPENAI_TRANSPORT) { $env:AETHER_OPENAI_TRANSPORT = "codex_cli" }
-if (-not $env:AETHER_OPENAI_MODEL) { $env:AETHER_OPENAI_MODEL = "gpt-5.4-mini" }
+if (-not $env:AETHER_OPENAI_MODEL) { $env:AETHER_OPENAI_MODEL = if ($researchTurbo) { "gpt-5.3-codex-spark" } else { "gpt-5.4-mini" } }
 # gpt-5.5 can be enabled explicitly, but the current local Codex CLI build exits
 # non-zero with that model on this machine. Default to the healthy model so the
 # research loop keeps producing hypotheses instead of opening the circuit breaker.
-if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL = "gpt-5.4-mini" }
-if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT = "high" }
-if (-not $env:AETHER_CODEX_CLI_TIMEOUT) { $env:AETHER_CODEX_CLI_TIMEOUT = "300" }
+if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL = if ($researchTurbo) { "gpt-5.3-codex-spark" } else { "gpt-5.4-mini" } }
+if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT = if ($researchTurbo) { "low" } else { "high" } }
+if (-not $env:AETHER_CODEX_CLI_TIMEOUT) { $env:AETHER_CODEX_CLI_TIMEOUT = if ($researchTurbo) { "150" } else { "300" } }
 if (-not $env:AETHER_CONTEXT_BROKER) { $env:AETHER_CONTEXT_BROKER = "0" }
 $env:AETHER_DEPLOY_CRITIC_GATE = if ($env:AETHER_DEPLOY_CRITIC_GATE) { $env:AETHER_DEPLOY_CRITIC_GATE } else { "approved" }
-$env:AETHER_DEPLOY_MIN_TRADES = if ($env:AETHER_DEPLOY_MIN_TRADES) { $env:AETHER_DEPLOY_MIN_TRADES } else { "12" }
+$env:AETHER_DEPLOY_MIN_SCORE = if ($env:AETHER_DEPLOY_MIN_SCORE) { $env:AETHER_DEPLOY_MIN_SCORE } else { "0.50" }
+$env:AETHER_DEPLOY_MIN_PNL_PCT = if ($env:AETHER_DEPLOY_MIN_PNL_PCT) { $env:AETHER_DEPLOY_MIN_PNL_PCT } else { "10.0" }
+$env:AETHER_DEPLOY_MIN_TRADES = if ($env:AETHER_DEPLOY_MIN_TRADES) { $env:AETHER_DEPLOY_MIN_TRADES } else { "30" }
+$env:AETHER_DEPLOY_MAX_MDD_PCT = if ($env:AETHER_DEPLOY_MAX_MDD_PCT) { $env:AETHER_DEPLOY_MAX_MDD_PCT } else { "30.0" }
 $env:AETHER_DEPLOY_REQUIRE_COMBO_FOR_MULTI = if ($env:AETHER_DEPLOY_REQUIRE_COMBO_FOR_MULTI) { $env:AETHER_DEPLOY_REQUIRE_COMBO_FOR_MULTI } else { "1" }
-# Caps de diversidade afrouxados 2026-05-12 (pedido do usuario: mais profundidade
-# de ensemble). Antes: family=30 asset=12 asset_family_tf=5 hyp_asset=2 top_n=80.
-$env:AETHER_DEPLOY_MAX_PER_FAMILY = if ($env:AETHER_DEPLOY_MAX_PER_FAMILY) { $env:AETHER_DEPLOY_MAX_PER_FAMILY } else { "40" }
-$env:AETHER_DEPLOY_MAX_PER_ASSET = if ($env:AETHER_DEPLOY_MAX_PER_ASSET) { $env:AETHER_DEPLOY_MAX_PER_ASSET } else { "18" }
-$env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF = if ($env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF) { $env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF } else { "8" }
-$env:AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET = if ($env:AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET) { $env:AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET } else { "0" }
+# Peneira 2026-05-19: menos variantes parecidas e gates de robustez mais altos.
+$env:AETHER_DEPLOY_MAX_PER_FAMILY = if ($env:AETHER_DEPLOY_MAX_PER_FAMILY) { $env:AETHER_DEPLOY_MAX_PER_FAMILY } else { "20" }
+$env:AETHER_DEPLOY_MAX_PER_ASSET = if ($env:AETHER_DEPLOY_MAX_PER_ASSET) { $env:AETHER_DEPLOY_MAX_PER_ASSET } else { "5" }
+$env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF = if ($env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF) { $env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF } else { "3" }
+$env:AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET = if ($env:AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET) { $env:AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET } else { "2" }
 $env:AETHER_DEPLOY_ALLOWED_ASSETS = if ($env:AETHER_DEPLOY_ALLOWED_ASSETS) { $env:AETHER_DEPLOY_ALLOWED_ASSETS } else { "BTCUSDT,ETHUSDT,SOLUSDT,ADAUSDT,XRPUSDT,LINKUSDT,DOGEUSDT,AVAXUSDT,BNBUSDT" }
 $env:AETHER_DEPLOY_ALLOWED_TIMEFRAMES = if ($env:AETHER_DEPLOY_ALLOWED_TIMEFRAMES) { $env:AETHER_DEPLOY_ALLOWED_TIMEFRAMES } else { "15m,1h,4h,1d" }
-$env:AETHER_DEPLOY_TOP_N = if ($env:AETHER_DEPLOY_TOP_N) { $env:AETHER_DEPLOY_TOP_N } else { "250" }
+$env:AETHER_DEPLOY_TOP_N = if ($env:AETHER_DEPLOY_TOP_N) { $env:AETHER_DEPLOY_TOP_N } else { "40" }
 $env:AETHER_STRATEGIES_ONLY = if ($env:AETHER_STRATEGIES_ONLY) { $env:AETHER_STRATEGIES_ONLY } else { "1" }
 $env:AETHER_PAPER_READY_REQUIRE_CRITIC = if ($env:AETHER_PAPER_READY_REQUIRE_CRITIC) { $env:AETHER_PAPER_READY_REQUIRE_CRITIC } else { "1" }
 $env:AETHER_PAPER_READY_MIN_TRADES = if ($env:AETHER_PAPER_READY_MIN_TRADES) { $env:AETHER_PAPER_READY_MIN_TRADES } else { "30" }
@@ -105,13 +114,19 @@ $env:AETHER_CRITIC_CROSS_MIN_PNL = if ($env:AETHER_CRITIC_CROSS_MIN_PNL) { $env:
 $env:AETHER_CRITIC_GRID_MIN_P25_PNL = if ($env:AETHER_CRITIC_GRID_MIN_P25_PNL) { $env:AETHER_CRITIC_GRID_MIN_P25_PNL } else { "-7.0" }
 $env:AETHER_CRITIC_MTF_DISABLE = if ($env:AETHER_CRITIC_MTF_DISABLE) { $env:AETHER_CRITIC_MTF_DISABLE } else { "1" }
 $env:AETHER_CRITIC_BOOTSTRAP_MIN_SHARPE_P5 = if ($env:AETHER_CRITIC_BOOTSTRAP_MIN_SHARPE_P5) { $env:AETHER_CRITIC_BOOTSTRAP_MIN_SHARPE_P5 } else { "-0.3" }
-if (-not $env:AETHER_LLM_HEARTBEAT_EVERY) { $env:AETHER_LLM_HEARTBEAT_EVERY = if ($Stack) { "2" } else { "3" } }
-if (-not $env:AETHER_FORCE_EXPLORATION_EVERY) { $env:AETHER_FORCE_EXPLORATION_EVERY = if ($Stack) { "2" } else { "4" } }
-if (-not $env:AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES) { $env:AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES = if ($Stack) { "8" } else { "15" } }
+if (-not $env:AETHER_LLM_HEARTBEAT_EVERY) { $env:AETHER_LLM_HEARTBEAT_EVERY = if ($researchTurbo) { "1" } else { "3" } }
+if (-not $env:AETHER_FORCE_EXPLORATION_EVERY) { $env:AETHER_FORCE_EXPLORATION_EVERY = if ($researchTurbo) { "2" } else { "4" } }
+if (-not $env:AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES) { $env:AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES = if ($researchTurbo) { "2" } else { "15" } }
 if (-not $env:AETHER_WEB_RESEARCH_HEARTBEAT_EVERY) { $env:AETHER_WEB_RESEARCH_HEARTBEAT_EVERY = "1" }
-if (-not $env:AETHER_WEB_INFLIGHT_TOLERANCE) { $env:AETHER_WEB_INFLIGHT_TOLERANCE = "24" }
-if (-not $env:AETHER_CONTINUOUS_RESEARCH_INTERVAL_SECONDS) { $env:AETHER_CONTINUOUS_RESEARCH_INTERVAL_SECONDS = if ($Stack) { "20" } else { "25" } }
-if (-not $env:AETHER_LLM_INFLIGHT_TOLERANCE) { $env:AETHER_LLM_INFLIGHT_TOLERANCE = "32" }
+if (-not $env:AETHER_WEB_RESEARCH_HEARTBEAT_BATCH) { $env:AETHER_WEB_RESEARCH_HEARTBEAT_BATCH = if ($researchTurbo) { "3" } else { "1" } }
+if (-not $env:AETHER_WEB_INFLIGHT_TOLERANCE) { $env:AETHER_WEB_INFLIGHT_TOLERANCE = if ($researchTurbo) { "36" } else { "24" } }
+if (-not $env:AETHER_CONTINUOUS_RESEARCH_INTERVAL_SECONDS) { $env:AETHER_CONTINUOUS_RESEARCH_INTERVAL_SECONDS = if ($researchTurbo) { "12" } else { "25" } }
+if (-not $env:AETHER_LLM_INFLIGHT_TOLERANCE) { $env:AETHER_LLM_INFLIGHT_TOLERANCE = if ($researchTurbo) { "40" } else { "32" } }
+if (-not $env:AETHER_CYCLE_AUTO_START) { $env:AETHER_CYCLE_AUTO_START = if ($researchTurbo) { "1" } else { "0" } }
+if (-not $env:AETHER_CYCLE_WORKERS) { $env:AETHER_CYCLE_WORKERS = if ($researchTurbo) { "12" } else { "4" } }
+if (-not $env:AETHER_CYCLE_LIMIT_NODES) { $env:AETHER_CYCLE_LIMIT_NODES = if ($researchTurbo) { "24" } else { "8" } }
+if (-not $env:AETHER_CYCLE_PROBES_PER_NODE) { $env:AETHER_CYCLE_PROBES_PER_NODE = if ($researchTurbo) { "80" } else { "60" } }
+if (-not $env:AETHER_CYCLE_MAX_TASKS) { $env:AETHER_CYCLE_MAX_TASKS = if ($researchTurbo) { "24" } else { "8" } }
 if (-not $Stack) {
     $env:AETHER_OPENAI_ROLE_VALIDATION_AGENT_MODEL = if ($env:AETHER_OPENAI_ROLE_VALIDATION_AGENT_MODEL) { $env:AETHER_OPENAI_ROLE_VALIDATION_AGENT_MODEL } else { $env:AETHER_OPENAI_MODEL }
     $env:AETHER_OPENAI_ROLE_PORTFOLIO_AGENT_MODEL = if ($env:AETHER_OPENAI_ROLE_PORTFOLIO_AGENT_MODEL) { $env:AETHER_OPENAI_ROLE_PORTFOLIO_AGENT_MODEL } else { $env:AETHER_OPENAI_MODEL }
@@ -223,9 +238,61 @@ foreach ($entry in $modules) {
     Write-Host ("[OK] {0,-10} pid={1,-6} log={2}" -f $name, $proc.Id, $logPath) -ForegroundColor Green
 }
 
+$deployWatchdogEnabled = (-not $env:AETHER_DEPLOY_WATCHDOG) -or ($env:AETHER_DEPLOY_WATCHDOG.Trim().ToLowerInvariant() -in @("1", "true", "yes", "on"))
+if (($Full -or $Stack) -and $deployWatchdogEnabled) {
+    $watchdogScript = Join-Path $root "scripts\_watchdog_stack.py"
+    if (Test-Path $watchdogScript) {
+        $name = "watchdog"
+        $logPath = Join-Path $logsDir ("{0}-{1}.log" -f $name, $stamp)
+        $errPath = Join-Path $logsDir ("{0}-{1}.err.log" -f $name, $stamp)
+        Set-Content -Path $logPath -Value ("[start] {0} scripts._watchdog_stack" -f (Get-Date -Format o)) -Encoding utf8
+        Set-Content -Path $errPath -Value "" -Encoding utf8
+        $proc = Start-Process -FilePath $python `
+            -ArgumentList @("-u", "-m", "scripts._watchdog_stack") `
+            -WorkingDirectory $root `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $logPath `
+            -RedirectStandardError $errPath `
+            -PassThru
+        Add-Content -Path $pidFile -Value ("{0}`t{1}`t{2}" -f $proc.Id, $name, "scripts._watchdog_stack")
+        $started += [pscustomobject]@{ Name=$name; Pid=$proc.Id; Log=$logPath }
+        Write-Host ("[OK] {0,-10} pid={1,-6} log={2}" -f $name, $proc.Id, $logPath) -ForegroundColor Green
+    }
+}
+
 Write-Host ""
 Write-Host "Stack rodando em background. Dashboard: http://127.0.0.1:8765" -ForegroundColor Cyan
 Write-Host "Acompanhar log:  .\scripts\tail_aether.ps1 server" -ForegroundColor DarkGray
 Write-Host "Parar tudo:      .\scripts\stop_aether.ps1" -ForegroundColor DarkGray
 Write-Host ""
 $started | Format-Table -AutoSize
+
+function Test-EnvTruthy {
+    param([string]$Value)
+    return $Value -and ($Value.Trim().ToLowerInvariant() -in @("1", "true", "yes", "on"))
+}
+
+function Start-ContinuousResearchCycle {
+    $workers = [int]$env:AETHER_CYCLE_WORKERS
+    $limitNodes = [int]$env:AETHER_CYCLE_LIMIT_NODES
+    $probesPerNode = [int]$env:AETHER_CYCLE_PROBES_PER_NODE
+    $maxTasks = [int]$env:AETHER_CYCLE_MAX_TASKS
+    $uri = "http://127.0.0.1:8765/api/cycle/start?workers=$workers&limit_nodes=$limitNodes&probes_per_node=$probesPerNode&max_tasks=$maxTasks&continuous=true"
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+        try {
+            Start-Sleep -Seconds 2
+            $result = Invoke-RestMethod -Method Post -Uri $uri -TimeoutSec 12
+            Write-Host ("[cycle] started={0} limit_nodes={1} max_tasks={2} workers={3}" -f $result.started, $result.effective_limit_nodes, $result.effective_max_tasks, $result.workers) -ForegroundColor Green
+            return
+        } catch {
+            if ($attempt -eq 8) {
+                Write-Host ("[cycle] FALHOU iniciar: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+                return
+            }
+        }
+    }
+}
+
+if (($Full -or $Stack) -and (Test-EnvTruthy $env:AETHER_CYCLE_AUTO_START)) {
+    Start-ContinuousResearchCycle
+}

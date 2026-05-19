@@ -9,29 +9,28 @@ REM Aether dashboard: http://127.0.0.1:8765
 
 cd /d "%~dp0"
 
-REM Caps de variantes TODOS DESLIGADOS - so dedupe estrutural permanece
-REM (engine+params+asset+risk identicos colapsam, mantem o de maior score).
-REM Razao: variantes com parametros diferentes sao estrategias DIFERENTES e
-REM devem coexistir se foram aprovadas pelo Critic v4.
-set "AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF=0"
-set "AETHER_DEPLOY_MAX_PER_ASSET=0"
-set "AETHER_DEPLOY_MAX_PER_FAMILY=0"
-set "AETHER_DEPLOY_TOP_N=250"
-set "AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET=0"
+REM Peneira 2026-05-19: menos variantes parecidas e gates de robustez mais altos.
+REM Mantem diversidade por ativo/familia e evita reativar estrategias bloqueadas
+REM em src\logs\research\strategy_blocklist.json.
+set "AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF=3"
+set "AETHER_DEPLOY_MAX_PER_ASSET=5"
+set "AETHER_DEPLOY_MAX_PER_FAMILY=20"
+set "AETHER_DEPLOY_TOP_N=40"
+set "AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET=2"
 REM Sem cap de timeframe - 1H, 4H, 1D, todas entram (era so "1H" por default)
 set "AETHER_DEPLOY_ALLOWED_TIMEFRAMES=*"
 REM Allowlist alinhada com os 10 ativos do hub multi-TF (portfolio.yaml).
 REM Sem todos aqui, descobertas multi-TF nos novos ativos nao deployam.
 set "AETHER_DEPLOY_ALLOWED_ASSETS=BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,MATICUSDT"
 
-REM === Auto_deploy DESTRAVADO 2026-05-08 ===
-REM MIN_SCORE baixado de 0.55 -> 0.45: o Critic v5 (8 folds walk-forward,
-REM cross-symbol, regime gate, bootstrap) ja eh o filtro real de robustez.
-REM Score composto entre 0.42-0.55 representa estrategias que o Critic aprovou
-REM mas que ficaram em 2o plano no scoring weighted. Manter 0.55 estava
-REM cortando 49/71 validadas (69%) e gerando portfolio concentrado.
-REM Tier 3 do StrategyTiers faz a quarentena em paper.
-set "AETHER_DEPLOY_MIN_SCORE=0.45"
+REM === Auto_deploy com peneira 2026-05-19 ===
+REM MIN_SCORE=0.50 + trades>=30 + pnl>=10 + mdd<=30. O Critic continua sendo
+REM o filtro de robustez, mas o deploy agora evita estrategias fracas em paper
+REM e excesso de variantes parecidas no bot.
+set "AETHER_DEPLOY_MIN_SCORE=0.50"
+set "AETHER_DEPLOY_MIN_TRADES=30"
+set "AETHER_DEPLOY_MIN_PNL_PCT=10.0"
+set "AETHER_DEPLOY_MAX_MDD_PCT=30.0"
 
 REM === Critic v4 INTERMEDIARIO ===
 REM Calibracao 2026-05-07: nivel intermediario entre o default original
@@ -56,36 +55,49 @@ set "AETHER_CRITIC_GRID_MIN_P25_PNL=-7.0"
 
 REM === Modo industrial 2026-05-09 (autorizado: "mais robusto e produtivo mesmo que custe mais token") ===
 REM Tier C: maximizar throughput LLM sem quebrar concorrencia.
-REM   AETHER_LLM_MAX_NEW=12 (era 8): cada chamada LLM cria ate 12 hipoteses
-REM   AETHER_LLM_MAX_NEW_HARD_CAP=20 (era 12): destrava o cap interno
-REM   AETHER_LLM_HEARTBEAT_BATCH=8: batch maior em heartbeat
+REM   AETHER_LLM_MAX_NEW=3: lotes menores concluem mais rapido e evitam timeout
+REM   AETHER_LLM_MAX_NEW_HARD_CAP=5: destrava o cap interno sem criar lote gigante
+REM   AETHER_LLM_HEARTBEAT_BATCH=3: batch frequente em heartbeat
 REM   AETHER_LLM_HEARTBEAT_EVERY=1: dispara LLM a cada cycle quando ocioso
 REM   AETHER_FORCE_EXPLORATION_EVERY=2: forced rounds 2x mais frequentes
-REM   AETHER_LLM_INFLIGHT_TOLERANCE=16: permite ate 16 batches em voo concorrentes
-REM   AETHER_FAMILY_NODE_CAP=20: 2.5x mais nos por familia (combo destravado)
-REM   AETHER_INFLIGHT_WINDOW_MINUTES=15: janela inflight menor
-set "AETHER_LLM_MAX_NEW=12"
-set "AETHER_LLM_MAX_NEW_HARD_CAP=20"
-set "AETHER_LLM_HEARTBEAT_BATCH=8"
+REM   AETHER_LLM_INFLIGHT_TOLERANCE=40: permite mais batches em voo concorrentes
+REM   AETHER_FAMILY_NODE_CAP=24: mais nos por familia (combo destravado)
+REM   AETHER_INFLIGHT_WINDOW_MINUTES=12: janela inflight menor
+set "AETHER_LLM_MAX_NEW=3"
+set "AETHER_LLM_MAX_NEW_HARD_CAP=5"
+set "AETHER_LLM_HEARTBEAT_BATCH=3"
 set "AETHER_LLM_HEARTBEAT_EVERY=1"
 set "AETHER_FORCE_EXPLORATION_EVERY=2"
-set "AETHER_LLM_INFLIGHT_TOLERANCE=16"
-set "AETHER_FAMILY_NODE_CAP=20"
-set "AETHER_INFLIGHT_WINDOW_MINUTES=15"
-REM Qualidade de pesquisa: apenas o Hypothesis Generator usa GPT-5.5.
+set "AETHER_LLM_INFLIGHT_TOLERANCE=40"
+set "AETHER_FAMILY_NODE_CAP=24"
+set "AETHER_FAMILY_VALIDATED_CAP=8"
+set "AETHER_INFLIGHT_WINDOW_MINUTES=12"
+set "AETHER_HYPOTHESIS_MAX_TOKENS=3500"
+set "AETHER_ROLE_HYPOTHESIS_GENERATOR_MAX_TOKENS=3500"
+REM Qualidade de pesquisa: modelo saudavel no Codex CLI local.
 REM Os demais papeis continuam no modelo economico configurado no launcher.
-set "AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL=gpt-5.5"
-set "AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT=high"
+set "AETHER_OPENAI_MODEL=gpt-5.3-codex-spark"
+set "AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL=gpt-5.3-codex-spark"
+set "AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT=low"
 REM Pesquisa web continua: roda como heartbeat mesmo quando ja ha fila de testes.
 set "AETHER_WEB_RESEARCH_HEARTBEAT_EVERY=1"
-set "AETHER_WEB_INFLIGHT_TOLERANCE=24"
-set "AETHER_CONTINUOUS_RESEARCH_INTERVAL_SECONDS=20"
+set "AETHER_WEB_RESEARCH_HEARTBEAT_BATCH=3"
+set "AETHER_WEB_INFLIGHT_TOLERANCE=36"
+set "AETHER_CONTINUOUS_RESEARCH_INTERVAL_SECONDS=12"
 REM Cooldown LLM agressivo: 45min default era conservador demais ("verde sem
-REM produzir"). 10min mantem espacamento saudavel sem matar throughput.
-set "AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES=10"
+REM produzir"). 2min mantem espacamento saudavel sem matar throughput.
+set "AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES=2"
 REM Mais probes por worker: batches scout terminam mais rapido = loop principal
 REM libera mais cedo para nova chamada LLM.
-set "AETHER_TARGET_PROBES_PER_WORKER=10"
+set "AETHER_TASKS_PER_WORKER=3"
+set "AETHER_TARGET_PROBES_PER_WORKER=12"
+set "AETHER_SCOUT_CANDIDATE_SCAN_LIMIT=240"
+set "AETHER_LIMIT_NODES_CAP=36"
+set "AETHER_CYCLE_AUTO_START=1"
+set "AETHER_CYCLE_WORKERS=12"
+set "AETHER_CYCLE_LIMIT_NODES=24"
+set "AETHER_CYCLE_PROBES_PER_NODE=80"
+set "AETHER_CYCLE_MAX_TASKS=24"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run_aether_bg.ps1" -Full -Restart
 if errorlevel 1 goto :end
@@ -97,7 +109,7 @@ REM workers=12 (escolha do usuario 2026-05-11). AVISO: nesta maquina pode dar
 REM DLL load failed / MemoryError em alguns workers quando o paging file estoura
 REM (tasks viram 'failed', cycle continua). Pra eliminar: aumentar memoria virtual
 REM do Windows (Painel de Controle -> Sistema -> Avancado -> Memoria Virtual).
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 5; try { $r = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8765/api/cycle/start?workers=12&limit_nodes=24&probes_per_node=60&max_tasks=24&continuous=true' -TimeoutSec 10; Write-Host '[cycle] started=' $r.started 'limit_nodes=' $r.effective_limit_nodes } catch { Write-Host '[cycle] FALHOU iniciar:' $_.Exception.Message }"
+REM O run_aether_bg.ps1 agora auto-inicia o ciclo continuo usando AETHER_CYCLE_*.
 
 REM Agents loop (PolicyAgent + Tier 3) DESATIVADO por padrao - era ele que
 REM escrevia kill switch global por "estrategia nao aprovada" / "duplicidade",

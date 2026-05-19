@@ -27,7 +27,7 @@ def read_pids(path: Path) -> dict[str, int]:
     out: dict[str, int] = {}
     if not path.exists():
         return out
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip().lstrip("﻿")
         if not line:
             continue
@@ -78,6 +78,14 @@ def latest_log(prefix: str, dirpath: Path) -> Path | None:
     files = sorted(dirpath.glob(f"{prefix}-*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
     files = [f for f in files if not f.name.endswith(".err.log")]
     return files[0] if files else None
+
+
+def latest_deploy_log() -> Path | None:
+    """Prefer the auto_deploy internal log; stdout logs can stay quiet."""
+    internal = SRC_LOGS / "aether" / "auto_deploy.log"
+    if internal.exists():
+        return internal
+    return latest_log("deploy", LOGS)
 
 
 def db_latest_event_age() -> float | None:
@@ -151,7 +159,7 @@ def main() -> int:
         else:
             emit("WARN", "bot/log", "trading_bot.log nao existe")
         # Aether deploy log staleness (>120s sem update = problema)
-        dep = latest_log("deploy", LOGS)
+        dep = latest_deploy_log()
         if dep is not None:
             mt = file_mtime(dep)
             age = now - mt if mt else 9999

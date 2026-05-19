@@ -346,7 +346,7 @@ class BinanceTraderBot:
         """
         try:
             if self.paper_trading:
-                return self.last_stock_account_balance >= self.step_size
+                return self.last_stock_account_balance > 0
             try:
                 dust_pct = float(os.getenv("DUST_THRESHOLD_PCT", 0.50))
             except (TypeError, ValueError):

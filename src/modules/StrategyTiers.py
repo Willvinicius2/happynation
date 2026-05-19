@@ -29,30 +29,30 @@ import json
 import os
 from pathlib import Path
 
-# Tier -> parametros de risco/posicao
-# Calibracao config F (2026-05-12): SL 2.5% da posicao, trail ativa em +1.5%,
-# floor +1.2% (giveback adaptativo so corre acima desse piso).
+# Tier -> parametros de risco/posicao.
+# Saida acelerada 2026-05-19: mantem SL em 2.5% da posicao, mas ativa trailing
+# mais cedo, em +0.8%, com piso +0.5% e giveback menor.
 TIER_CONFIG = {
     1: {
         "position_usd": 300.0,
         "sl_usd": 7.5,
-        "trail_activation_usd": 4.5,
-        "trail_floor_usd": 3.6,
-        "trail_giveback_pct": 25.0,
+        "trail_activation_usd": 2.4,
+        "trail_floor_usd": 1.5,
+        "trail_giveback_pct": 18.0,
     },
     2: {
         "position_usd": 225.0,
         "sl_usd": 5.625,
-        "trail_activation_usd": 3.375,
-        "trail_floor_usd": 2.7,
-        "trail_giveback_pct": 25.0,
+        "trail_activation_usd": 1.8,
+        "trail_floor_usd": 1.125,
+        "trail_giveback_pct": 18.0,
     },
     3: {
         "position_usd": 150.0,
         "sl_usd": 3.75,
-        "trail_activation_usd": 2.25,
-        "trail_floor_usd": 1.8,
-        "trail_giveback_pct": 25.0,
+        "trail_activation_usd": 1.2,
+        "trail_floor_usd": 0.75,
+        "trail_giveback_pct": 18.0,
     },
 }
 
@@ -91,6 +91,8 @@ def _env_float(name: str, default: float) -> float:
 # O sistema combina com giveback adaptativo via max(): sempre o piso
 # mais protetor entre giveback% do peak e o ladder vence.
 PROFIT_LOCK_LADDER: list[tuple[float, float]] = [
+    (2.0, 1.0),
+    (3.0, 1.8),
     (5.0, 3.0),
     (7.0, 5.0),
     (10.0, 8.0),

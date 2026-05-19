@@ -49,10 +49,11 @@ def list_aether_processes() -> list[dict]:
     cmd = [
         "powershell", "-NoProfile", "-Command",
         "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-        "Where-Object { $_.CommandLine -match 'aether|src\\.main|src\\.dashboard|aether_promote|run_critic' } | "
+        "Where-Object { $_.CommandLine -match 'aether|src\\.main|src\\.dashboard|aether_promote|run_critic|scripts\\._watchdog_stack|_watchdog_stack' } | "
         "Select-Object ProcessId,ParentProcessId,@{N='Module';E={ if ($_.CommandLine -match 'src\\.research\\.aether\\.(\\w+)') { 'aether.' + $matches[1] } "
         "elseif ($_.CommandLine -match 'src\\.main') { 'bot' } "
         "elseif ($_.CommandLine -match 'aether_promote_with_validation') { 'promote_loop' } "
+        "elseif ($_.CommandLine -match 'scripts\\._watchdog_stack|_watchdog_stack') { 'deploy_watchdog' } "
         "elseif ($_.CommandLine -match 'src\\.dashboard') { 'dashboard' } "
         "else { 'other' } }} | ConvertTo-Json -Compress"
     ]
@@ -77,7 +78,8 @@ def show_processes() -> None:
         by_module[p.get("Module", "other")].append(p.get("ProcessId"))
 
     expected = ["aether.server", "aether.auto_validator", "aether.hyper_agent",
-                "aether.critic_agent", "promote_loop", "bot", "dashboard"]
+                "aether.critic_agent", "aether.auto_deploy", "deploy_watchdog",
+                "promote_loop", "bot", "dashboard"]
     for mod in expected:
         pids = by_module.get(mod, [])
         flag = "OK" if pids else "FALTA"

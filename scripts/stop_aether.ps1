@@ -43,6 +43,8 @@ foreach ($p in $pythonProcs) {
     if ($cmd) {
         $isProjectPython = (
             ($cmd -match "src\.research\.aether\.") -or
+            ($cmd -match "scripts[\\/]+_watchdog_stack\.py") -or
+            ($cmd -match "-m\s+scripts\._watchdog_stack(\s|$)") -or
             ($cmd -match "-m\s+src\.main(\s|$)") -or
             ($cmd -match "-m\s+src\.dashboard(\s|$)")
         )
@@ -51,6 +53,20 @@ foreach ($p in $pythonProcs) {
         try {
             Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
             if (-not $Quiet) { Write-Host ("[stop] pid={0} (python projeto orfao)" -f $p.ProcessId) -ForegroundColor Yellow }
+            $killed++
+        } catch {}
+    }
+}
+
+# 2b. Codex CLI execs iniciados pelo Aether podem sobreviver por alguns
+# segundos se o servidor for encerrado durante uma chamada LLM.
+$codexProcs = Get-CimInstance Win32_Process -Filter "Name='codex.exe' OR Name='Codex.exe'" -ErrorAction SilentlyContinue
+foreach ($p in $codexProcs) {
+    $cmd = $p.CommandLine
+    if ($cmd -and ($cmd -match "\\.sandbox-bin\\codex\.exe\s+exec" -or $cmd -match "\\.sandbox-bin\\codex\.exe.*\s+exec\s+")) {
+        try {
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
+            if (-not $Quiet) { Write-Host ("[stop] pid={0} (codex cli aether)" -f $p.ProcessId) -ForegroundColor Yellow }
             $killed++
         } catch {}
     }

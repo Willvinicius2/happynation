@@ -129,6 +129,39 @@ def test_strategy_runner_aether_only_blocks_legacy_when_asset_has_no_active(monk
     assert decision is None
 
 
+def test_strategy_runner_exits_open_position_when_asset_loses_active_strategy(monkeypatch):
+    monkeypatch.setenv("AETHER_STRATEGIES_ONLY", "1")
+    monkeypatch.setenv("AETHER_EXIT_NO_ACTIVE_STRATEGY", "1")
+    from src.modules.StrategyRunner import StrategyRunner
+    from src.modules.StrategyResearchEngine import StrategySpec
+    import src.research.active as active
+
+    monkeypatch.setattr(active, "active_manifest_enabled", lambda: True)
+    monkeypatch.setattr(
+        active,
+        "get_active_specs",
+        lambda asset=None: [] if asset == "BNBUSDT" else [StrategySpec("Aether:other#ok", _buy, {})],
+    )
+
+    trader = DummyTrader()
+    trader.operation_code = "BNBUSDT"
+    trader.actual_trade_position = True
+    trader.fallback_activated = False
+    data = pd.DataFrame({"close_price": [100.0, 101.0]})
+
+    decision = StrategyRunner.execute(
+        trader,
+        _raise_if_called,
+        _raise_if_called,
+        data,
+        main_strategy_args={},
+        fallback_strategy_args={},
+        verbose=False,
+    )
+
+    assert decision is False
+
+
 def test_constants_meet_minimum():
     assert HARD_FLOOR_BUY_VOTES >= 2
     assert HARD_FLOOR_BUY_WEIGHT >= 2.0
@@ -201,6 +234,20 @@ def test_paper_trading_defaults_to_safe_true(monkeypatch):
     from src.modules.BinanceTraderBot import _env_truthy
 
     assert _env_truthy("PAPER_TRADING", True) is True
+
+
+def test_paper_position_uses_open_qty_even_below_step_size():
+    from src.modules.BinanceTraderBot import BinanceTraderBot
+
+    trader = BinanceTraderBot.__new__(BinanceTraderBot)
+    trader.paper_trading = True
+    trader.step_size = 1.0
+    trader.last_stock_account_balance = 0.154
+
+    assert trader.getActualTradePosition() is True
+
+    trader.last_stock_account_balance = 0.0
+    assert trader.getActualTradePosition() is False
 
 
 def test_active_manifest_requires_catalog_approval(tmp_path, monkeypatch):

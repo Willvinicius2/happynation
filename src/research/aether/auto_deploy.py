@@ -24,6 +24,12 @@ from src.research.aether.config import db_path
 from src.research.active import deploy_record, list_active, remove
 
 LOG_PATH = Path(__file__).resolve().parents[3] / "src" / "logs" / "aether" / "auto_deploy.log"
+BLOCKLIST_PATH = Path(
+    os.environ.get(
+        "AETHER_DEPLOY_BLOCKLIST_PATH",
+        str(Path(__file__).resolve().parents[3] / "src" / "logs" / "research" / "strategy_blocklist.json"),
+    )
+)
 
 POLL_SECONDS = int(os.environ.get("AETHER_DEPLOY_POLL_SECONDS", "60"))
 
@@ -130,6 +136,37 @@ def _connect() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
+
+
+def _load_blocklist() -> dict:
+    if not BLOCKLIST_PATH.exists():
+        return {"active_ids": {}, "source_node_ids": {}}
+    try:
+        data = json.loads(BLOCKLIST_PATH.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {"active_ids": {}, "source_node_ids": {}}
+    active_ids = data.get("active_ids") or {}
+    source_node_ids = data.get("source_node_ids") or {}
+    if isinstance(active_ids, list):
+        active_ids = {str(item): {"reason": "blocked"} for item in active_ids}
+    if isinstance(source_node_ids, list):
+        source_node_ids = {str(item): {"reason": "blocked"} for item in source_node_ids}
+    return {
+        "active_ids": active_ids if isinstance(active_ids, dict) else {},
+        "source_node_ids": source_node_ids if isinstance(source_node_ids, dict) else {},
+    }
+
+
+def _block_reason(blocklist: dict, active_id: str, source_node_id: str) -> str:
+    for bucket, key in (("active_ids", active_id), ("source_node_ids", source_node_id)):
+        if not key:
+            continue
+        entry = (blocklist.get(bucket) or {}).get(str(key))
+        if entry:
+            if isinstance(entry, dict):
+                return str(entry.get("reason") or "blocked")
+            return str(entry)
+    return ""
 
 
 def _validated_nodes(conn: sqlite3.Connection) -> list[tuple[sqlite3.Row, dict]]:
@@ -364,14 +401,19 @@ def _select_deploy_records(ranked: list[tuple[float, dict]]) -> list[tuple[float
 
 
 def run_once(log: logging.Logger) -> dict:
+    blocklist = _load_blocklist()
     with _connect() as conn:
         nodes = _validated_nodes(conn)
     candidates: list[tuple[float, dict]] = []
+    blocked = 0
     for row, metrics in nodes:
         if not _passes_deploy_gates(metrics, float(row["score"])):
             continue
         rec = _record_for(row, metrics)
         if rec is None:
+            continue
+        if _block_reason(blocklist, str(rec.get("id") or ""), str(row["id"] or "")):
+            blocked += 1
             continue
         candidates.append((float(row["score"]), rec))
     # Dedupe estrutural por (engine, params, asset, risk) — preserva o de maior score.
@@ -426,9 +468,10 @@ def run_once(log: logging.Logger) -> dict:
     log.info(
         f"deploy: candidates={len(candidates)} struct_dedupe={after_struct} "
         f"func_dropped={func_dropped} after_dedupe={len(deduped)} "
-        f"deployed={deployed} skipped_unchanged={skipped_unchanged} removed_stale={removed}"
+        f"deployed={deployed} skipped_unchanged={skipped_unchanged} "
+        f"removed_stale={removed} blocked={blocked}"
     )
-    return {"deployed": deployed, "removed": removed, "candidates": len(candidates)}
+    return {"deployed": deployed, "removed": removed, "candidates": len(candidates), "blocked": blocked}
 
 
 def main() -> int:
@@ -445,6 +488,7 @@ def main() -> int:
         MAX_PER_ASSET_FAMILY_TF,
         MAX_PER_HYPOTHESIS_ASSET,
     )
+    log.info("blocklist=%s", BLOCKLIST_PATH)
     while True:
         try:
             run_once(log)
