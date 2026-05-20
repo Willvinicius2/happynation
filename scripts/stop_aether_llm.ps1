@@ -1,4 +1,4 @@
-# Para APENAS os modulos do Aether que dependem de Claude/LLM:
+# Para APENAS os modulos do Aether que dependem de OpenAI/LLM:
 #   server, auto_validator, hyper_agent
 # NAO toca em critic_agent, promote_loop, ou bot principal — esses
 # rodam 24/7 sem IA.

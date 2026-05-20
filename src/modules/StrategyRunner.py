@@ -34,6 +34,9 @@ class StrategyRunner:
             active_specs = get_active_specs(asset=asset)
             any_active_specs = get_active_specs() if aether_only else []
             if aether_only and any_active_specs and not active_specs:
+                if getattr(self, "actual_trade_position", False) and _env_truthy("AETHER_EXIT_NO_ACTIVE_STRATEGY", False):
+                    print(f"Aether-only: sem estrategia validada para {asset}; saindo da posicao.")
+                    return False
                 print(f"Aether-only: sem estrategia validada para {asset}; aguardando.")
                 return True if getattr(self, "actual_trade_position", False) else None
 

@@ -220,6 +220,18 @@ def MultiStrategy(
     except Exception:
         paused_strategies = {}
 
+    dead_strategies: set[str] = set()
+    if _env_truthy("AETHER_SKIP_DEAD_STRATEGIES", True):
+        try:
+            from src.modules.PaperBalanceLogger import get_dead_strategies
+
+            dead_strategies = set(get_dead_strategies(
+                min_calls=_env_int("AETHER_DEAD_MIN_CALLS", 1000),
+                max_active_pct=_env_float("AETHER_DEAD_MAX_ACTIVE_PCT", 0.1),
+            ))
+        except Exception:
+            dead_strategies = set()
+
     # Pisos absolutos de seguranca para a cesta legada. No modo Aether-only,
     # um voto ja representa uma estrategia validada/criticada; exigir dois votos
     # impediria ativos com uma unica estrategia aprovada de operar.
@@ -251,9 +263,13 @@ def MultiStrategy(
                 key=lambda t: _tf_minutes(t) or 999999,
             )
 
+    in_position = bool(getattr(self, "actual_trade_position", False))
     for spec in specs:
         if spec.name in paused_strategies:
             skipped_votes.append(f"{spec.name}:pausada")
+            continue
+        if not in_position and spec.name in dead_strategies:
+            skipped_votes.append(f"{spec.name}:sem_sinal")
             continue
         spec_tf = (spec.timeframe or "").lower() or None
         spec_tf_min = _tf_minutes(spec_tf) if spec_tf else None
@@ -346,7 +362,6 @@ def MultiStrategy(
         else:
             neutral_votes.append(spec.name)
 
-    in_position = bool(getattr(self, "actual_trade_position", False))
     owner_decides = using_aether_only and _env_truthy("AETHER_OWNER_DECIDES_EXIT", True)
     owner_strategies: list[str] = []
     if in_position and owner_decides:

@@ -48,14 +48,34 @@ def _env_truthy(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _ranking_reset_after(conn: sqlite3.Connection, campaign_id: str) -> str | None:
+    if not _env_truthy("AETHER_FOCUS_RESPECT_RANKING_RESET", True):
+        return None
+    try:
+        from .db import get_setting
+
+        state = get_setting(conn, f"ranking_hidden_node_ids:{campaign_id}", default={})
+    except Exception:
+        return None
+    if isinstance(state, dict) and state.get("reset_at"):
+        return str(state["reset_at"])
+    return None
+
+
 def assess(conn: sqlite3.Connection, campaign_id: str) -> dict[str, Any]:
+    reset_after = _ranking_reset_after(conn, campaign_id)
+    reset_clause = "AND created_at > ?" if reset_after else ""
+    params: list[Any] = [campaign_id]
+    if reset_after:
+        params.append(reset_after)
     rows = conn.execute(
-        """
+        f"""
         SELECT status, depth
         FROM nodes
         WHERE campaign_id=? AND id != 'root' AND id NOT LIKE 'tf:%'
+          {reset_clause}
         """,
-        (campaign_id,),
+        params,
     ).fetchall()
     open_count = 0
     closed_count = 0
@@ -126,15 +146,22 @@ def should_open_new_branch(conn: sqlite3.Connection, campaign_id: str) -> tuple[
 
 def priority_targets(conn: sqlite3.Connection, campaign_id: str, limit: int = 12) -> list[dict[str, Any]]:
     """Lista ramos abertos prioritarios — quanto maior priority/score, mais critico finalizar."""
+    reset_after = _ranking_reset_after(conn, campaign_id)
+    reset_clause = "AND created_at > ?" if reset_after else ""
+    params: list[Any] = [campaign_id]
+    if reset_after:
+        params.append(reset_after)
+    params.append(limit)
     rows = conn.execute(
-        """
+        f"""
         SELECT id, name, status, score, priority, depth, parent_id, updated_at
         FROM nodes
         WHERE campaign_id=? AND status IN ('candidate','queued','running','expand','promising')
+          {reset_clause}
         ORDER BY priority DESC, score DESC, updated_at ASC
         LIMIT ?
         """,
-        (campaign_id, limit),
+        params,
     ).fetchall()
     return [
         {

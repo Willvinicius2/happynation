@@ -95,10 +95,14 @@ FALLBACK_STRATEGY_ARGS = {"fast_window": 7, "slow_window": 40}
 ACCEPTABLE_LOSS_PERCENTAGE = 2
 STOP_LOSS_PERCENTAGE = 2
 
-# Protecao USD-based
-STOP_LOSS_USD = 10.0
-TRAIL_ACTIVATION_USD = 4.0
-TRAIL_FLOOR_USD = 4.0
+# Protecao USD-based.
+# Fallback alinhado ao tier 3 (StrategyTiers.py): se o snapshot do tier nao
+# vier por algum motivo, ainda caimos em valores coerentes com posicao $50.
+# O tier override (_apply_tier_before_buy) sobrepoe estes valores antes de cada
+# compra com base no rank da estrategia.
+STOP_LOSS_USD = 1.0
+TRAIL_ACTIVATION_USD = 0.5
+TRAIL_FLOOR_USD = 0.3
 TRAIL_GIVEBACK_PCT = 25.0
 
 TRAILING_STOP_ENABLED = False
@@ -219,9 +223,11 @@ CHAMPIONS_BASE = {
 def MULTI_ARGS():
     return {
         "champion_args": dict(CHAMPIONS_BASE),
-        "min_buy_votes": 2,
+        # Fase de teste: 1 voto basta pra disparar compra. Em producao subir
+        # pra 2 (consenso) quando quiser filtrar mais sinal isolado.
+        "min_buy_votes": 1,
         "min_sell_votes": 1,
-        "min_buy_weight": 2.0,
+        "min_buy_weight": 1.0,
         "min_sell_weight": 1.0,
         "bot_timeframe": "15m",
         "entry_mode": "normal",

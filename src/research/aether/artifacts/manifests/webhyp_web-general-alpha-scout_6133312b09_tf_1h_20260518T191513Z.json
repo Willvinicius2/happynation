@@ -1,0 +1,103 @@
+{
+  "manifest_version": "aether-mvp-v1",
+  "generated_at": "2026-05-18T19:15:13Z",
+  "paper_activation": "manual_only",
+  "node": {
+    "id": "webhyp:web-general-alpha-scout:6133312b09:tf:1h",
+    "code": "WEB-1h",
+    "name": "Web general alpha scout / 1h",
+    "hypothesis": "Uma fonte externa sugere sinal preditivo em cripto; o scout traduz a ideia para familias simples e auditaveis antes de gastar validacao profunda. Timeframe alvo: 1h.",
+    "status": "candidate",
+    "score": 0.44,
+    "timeframe": "1h",
+    "agent_role": "agent_1h"
+  },
+  "engine": {
+    "family": "unknown",
+    "params": {}
+  },
+  "dataset": {
+    "dataset_id": null,
+    "symbol": null,
+    "timeframe": "1h"
+  },
+  "costs": {
+    "taker_fee_bps": 10.0,
+    "slippage_bps_per_unit_notional": 2.0,
+    "spread_bps": 0.0
+  },
+  "sizing": {
+    "mode": "fixed_notional",
+    "capital": 10000.0,
+    "fraction": 0.1,
+    "leverage_max": 2.0
+  },
+  "runtime_invariants": {
+    "entry_fill": "market_at_open_next_bar",
+    "exit_fill": "market_at_open_next_bar",
+    "stop_loss": "disabled",
+    "signal_arbitration": "exit_wins_on_tie",
+    "paper_or_live_activation": "forbidden_without_human_command"
+  },
+  "metrics": {
+    "engines": [
+      "rsi",
+      "bollinger",
+      "ma_crossover",
+      "donchian"
+    ],
+    "generator": "web_research",
+    "probe_specs": [
+      {
+        "engine": "rsi",
+        "params": {
+          "long_only": false,
+          "overbought": 70.0,
+          "oversold": 30.0,
+          "period": 14
+        }
+      },
+      {
+        "engine": "bollinger",
+        "params": {
+          "long_only": false,
+          "num_std": 2.0,
+          "window": 20
+        }
+      },
+      {
+        "engine": "ma_crossover",
+        "params": {
+          "long_only": true,
+          "long_window": 21,
+          "short_window": 8
+        }
+      },
+      {
+        "engine": "donchian",
+        "params": {
+          "entry_window": 20,
+          "exit_window": 10,
+          "long_only": false
+        }
+      }
+    ],
+    "source_title": "The Privacy Subsidy: Kyle's $λ$ under Noise-Perturbed Order-Flow Observation",
+    "source_url": "http://arxiv.org/abs/2605.15746v1"
+  },
+  "pseudocode": [
+    "See linked strategy implementation."
+  ],
+  "limitations": [
+    "Manifest gerado por MVP; exige revisao humana antes de paper.",
+    "Scout nao substitui validacao profunda cross-era, bootstrap e portfolio integration.",
+    "Nenhuma ativacao paper/live foi executada."
+  ],
+  "paper_checklist": [
+    "Validar causalidade e lookahead.",
+    "Rodar fee/slippage/spread stress.",
+    "Rodar cross-era e sensitivity local.",
+    "Confirmar adapter do bot para engine e parametros.",
+    "Confirmar sizing e runtime invariants no paper runtime."
+  ]
+}

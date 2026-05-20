@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from .compute import default_probes_for_timeframe, run_sweep
+from .campaigns import get_active_campaign_id
 from .config import DEFAULT_WORKERS, LEGACY_ROOT
-from .db import add_event, connect, dumps, get_setting, loads
+from .db import add_event, connect, dumps, get_setting, loads, set_setting
 from .llm_runtime import call_llm_agent
 from .llm_traces import record_llm_trace
 from .repository import (
@@ -34,6 +35,7 @@ from .llm_hypothesis import ALLOWED_ENGINES, create_llm_hypothesis_batch
 from .web_research import create_web_hypothesis_batch
 
 _RUN_LOCK = threading.Lock()
+_RESEARCH_LOCK = threading.Lock()
 _ACTIVE_THREAD: threading.Thread | None = None
 _STOP_EVENT = threading.Event()
 _CYCLE_MODE = "standby"
@@ -115,17 +117,111 @@ def bootstrap() -> None:
     with connect() as conn:
         ensure_agents(conn)
         seed_base_tree(conn)
+        _reset_interrupted_running(conn)
+        _cancel_pre_reset_scout_tasks(conn)
         mark_agents_without_work_standby(conn)
         _purge_stale_pruned(conn)
 
 
+def _reset_interrupted_running(conn) -> None:
+    ts = now_iso()
+    requeued = conn.execute(
+        """
+        UPDATE tasks
+        SET status='queued',
+            error='requeued after Aether restart',
+            lease_owner=NULL,
+            lease_until=NULL,
+            updated_at=?
+        WHERE status='running'
+        """,
+        (ts,),
+    ).rowcount
+    interrupted = conn.execute(
+        """
+        UPDATE runs
+        SET status='failed',
+            finished_at=?,
+            summary_json=?
+        WHERE status='running'
+        """,
+        (ts, dumps({"interrupted": True, "reason": "Aether restart"})),
+    ).rowcount
+    if requeued or interrupted:
+        add_event(
+            conn,
+            type="restart_requeued_tasks",
+            agent_role="chief_orchestrator",
+            message=f"Restart recuperou {requeued} tarefas running e marcou {interrupted} runs antigas.",
+            payload={"requeued_tasks": requeued, "interrupted_runs": interrupted},
+        )
+
+
+def _cancel_pre_reset_scout_tasks(conn) -> None:
+    if os.environ.get("AETHER_CYCLE_RESPECT_RANKING_RESET", "1").strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+    campaign_id = get_active_campaign_id(conn)
+    reset_state = get_setting(conn, f"ranking_hidden_node_ids:{campaign_id}", default={})
+    if not isinstance(reset_state, dict) or not reset_state.get("reset_at"):
+        return
+    reset_at = str(reset_state["reset_at"])
+    ts = now_iso()
+    cancelled = conn.execute(
+        """
+        UPDATE tasks
+        SET status='stale',
+            error='ignored by ranking reset',
+            updated_at=?
+        WHERE status IN ('queued','running')
+          AND task_type='scout_sweep'
+          AND id IN (
+            SELECT t.id
+            FROM tasks t
+            JOIN nodes n ON n.id=t.node_id
+            WHERE n.campaign_id=?
+              AND n.created_at <= ?
+          )
+        """,
+        (ts, campaign_id, reset_at),
+    ).rowcount
+    interrupted = conn.execute(
+        """
+        UPDATE runs
+        SET status='failed',
+            finished_at=?,
+            summary_json=?
+        WHERE status='running'
+          AND node_id IN (
+            SELECT id FROM nodes
+            WHERE campaign_id=?
+              AND created_at <= ?
+          )
+        """,
+        (ts, dumps({"interrupted": True, "reason": "ranking reset"}), campaign_id, reset_at),
+    ).rowcount
+    if cancelled or interrupted:
+        add_event(
+            conn,
+            type="pre_reset_tasks_cancelled",
+            campaign_id=campaign_id,
+            agent_role="chief_orchestrator",
+            message=f"Reset visual removeu {cancelled} tarefas antigas da fila e {interrupted} runs antigas.",
+            payload={"cancelled_tasks": cancelled, "interrupted_runs": interrupted, "reset_at": reset_at},
+        )
+
+
 def _purge_stale_pruned(conn, *, keep_recent: int | None = None) -> None:
-    """Apaga nodes pruned/paused antigos + events/runs velhos para manter a base enxuta.
+    """Apaga nodes pruned/paused/archive antigos + events/runs velhos para manter a base enxuta.
 
     Mantem os `keep_recent` nodes pruned/paused mais novos. Tambem trunca:
+      - nodes 'archive' com mais de N dias (AETHER_PURGE_ARCHIVE_DAYS, default 2)
       - events com mais de N dias (AETHER_PURGE_EVENTS_DAYS, default 3)
       - runs com mais de N dias (AETHER_PURGE_RUNS_DAYS, default 3)
-      - eventos/runs orfaos (sem node)
+      - embeddings/eventos/runs orfaos (sem node) — o maior vazamento de RAM do server
+
+    Razao: a arvore de pesquisa carrega TODO node + embedding em RAM. Nodes 'archive'
+    (dead-ends comprovados) e embeddings orfaos (de nodes ja deletados) acumulavam
+    indefinidamente e inflavam o server para 2.8GB+ -> MemoryError quando ao lado do bot.
     """
     if keep_recent is None:
         keep_recent = _env_int("AETHER_PURGE_KEEP_PRUNED", 30)
@@ -133,6 +229,7 @@ def _purge_stale_pruned(conn, *, keep_recent: int | None = None) -> None:
     runs_days = _env_int("AETHER_PURGE_RUNS_DAYS", 3)
     events_max = _env_int("AETHER_PURGE_EVENTS_MAX", 5000)
     runs_max = _env_int("AETHER_PURGE_RUNS_MAX", 2000)
+    archive_days = _env_int("AETHER_PURGE_ARCHIVE_DAYS", 2)
     try:
         from datetime import datetime, timedelta, timezone
         cutoff_events = (datetime.now(timezone.utc) - timedelta(days=events_days)).isoformat()
@@ -167,6 +264,24 @@ def _purge_stale_pruned(conn, *, keep_recent: int | None = None) -> None:
                 if n == 0 and n2 == 0:
                     break
                 to_delete = []
+        # archive nodes antigos (dead-ends comprovados) — nao contribuem em nada
+        cutoff_archive = (datetime.now(timezone.utc) - timedelta(days=archive_days)).isoformat()
+        for _ in range(20):
+            n = conn.execute(
+                "DELETE FROM nodes WHERE status='archive' AND updated_at < ?",
+                (cutoff_archive,),
+            ).rowcount
+            n2 = conn.execute(
+                "DELETE FROM nodes WHERE parent_id IS NOT NULL AND parent_id != '' "
+                "AND parent_id NOT IN (SELECT id FROM nodes)"
+            ).rowcount
+            conn.commit()
+            if n == 0 and n2 == 0:
+                break
+        # embeddings orfaos — maior fonte de bloat de RAM do server
+        conn.execute(
+            "DELETE FROM node_embeddings WHERE node_id NOT IN (SELECT id FROM nodes)"
+        )
         conn.execute(
             "DELETE FROM events WHERE node_id IS NOT NULL AND node_id != '' "
             "AND node_id NOT IN (SELECT id FROM nodes)"
@@ -199,8 +314,17 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 FORCE_EXPLORATION_EVERY = _env_int("AETHER_FORCE_EXPLORATION_EVERY", 4)
 LLM_HEARTBEAT_EVERY = _env_int("AETHER_LLM_HEARTBEAT_EVERY", 2)  # gera 1 hipotese LLM a cada N ciclos mesmo se houver candidatos
+WEB_RESEARCH_HEARTBEAT_EVERY = _env_int("AETHER_WEB_RESEARCH_HEARTBEAT_EVERY", 1)
+WEB_RESEARCH_BACKOFF_KEY = "web_research_backoff"
 
 
 def _inflight_count(conn, source_type: str) -> int:
@@ -254,6 +378,43 @@ def _llm_batch_size(
     return 0
 
 
+def _web_research_backoff_state(conn) -> dict[str, Any]:
+    if not _env_enabled("AETHER_WEB_RESEARCH_BACKOFF_ENABLED", "1"):
+        return {"active": False}
+    state = get_setting(conn, WEB_RESEARCH_BACKOFF_KEY, default={})
+    if not isinstance(state, dict):
+        return {"active": False}
+    until = str(state.get("until") or "")
+    active = bool(until and until > now_iso())
+    state["active"] = active
+    return state
+
+
+def _record_web_research_result(conn, result: dict[str, Any]) -> None:
+    if not _env_enabled("AETHER_WEB_RESEARCH_BACKOFF_ENABLED", "1"):
+        return
+    created = int(result.get("created_hypotheses") or 0)
+    if created > 0:
+        set_setting(conn, WEB_RESEARCH_BACKOFF_KEY, {"zero_count": 0, "until": None})
+        return
+    prior = get_setting(conn, WEB_RESEARCH_BACKOFF_KEY, default={})
+    zero_count = int(prior.get("zero_count") or 0) + 1 if isinstance(prior, dict) else 1
+    threshold = max(1, _env_int("AETHER_WEB_RESEARCH_ZERO_THRESHOLD", 3))
+    if zero_count < threshold:
+        set_setting(conn, WEB_RESEARCH_BACKOFF_KEY, {"zero_count": zero_count, "until": None})
+        return
+    cooldown_min = max(1, _env_int("AETHER_WEB_RESEARCH_EMPTY_COOLDOWN_MINUTES", 30))
+    until = (datetime.now(timezone.utc) + timedelta(minutes=cooldown_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    set_setting(conn, WEB_RESEARCH_BACKOFF_KEY, {"zero_count": zero_count, "until": until})
+    add_event(
+        conn,
+        type="web_research_backoff",
+        agent_role="hypothesis_generator",
+        message=f"Pesquisa web pausada por {cooldown_min}min apos {zero_count} rodadas sem hipoteses.",
+        payload={"zero_count": zero_count, "until": until},
+    )
+
+
 def _adaptive_cycle_budget(workers: int, limit_nodes: int, max_tasks: int) -> dict[str, int]:
     if not _env_enabled("AETHER_ADAPTIVE_TASK_BATCH", "1"):
         return {
@@ -294,7 +455,30 @@ def _force_every() -> int:
     return FORCE_EXPLORATION_EVERY
 
 
+def _web_heartbeat_every(conn) -> int:
+    try:
+        controls = get_setting(conn, "hyper_controls", default=None)
+        if isinstance(controls, dict) and controls.get("web_research_every") is not None:
+            return max(0, int(controls["web_research_every"]))
+    except Exception:
+        pass
+    return max(0, WEB_RESEARCH_HEARTBEAT_EVERY)
+
+
 def _run_research_phase(limit_nodes: int, *, loop_idx: int = 1) -> dict[str, Any]:
+    if not _RESEARCH_LOCK.acquire(blocking=False):
+        return {
+            "candidate_count": 0,
+            "generated_nodes": 0,
+            "skipped": "research_already_running",
+        }
+    try:
+        return _run_research_phase_locked(limit_nodes=limit_nodes, loop_idx=loop_idx)
+    finally:
+        _RESEARCH_LOCK.release()
+
+
+def _run_research_phase_locked(limit_nodes: int, *, loop_idx: int = 1) -> dict[str, Any]:
     with connect() as conn:
         ensure_agents(conn)
         set_agent_status(
@@ -328,6 +512,7 @@ def _run_research_phase(limit_nodes: int, *, loop_idx: int = 1) -> dict[str, Any
     time.sleep(1.2)
 
     with connect() as conn:
+        weak_prune = prune_weak_branches(conn)
         candidates = best_candidate_nodes(conn, limit=limit_nodes)
         generated = 0
         llm_generated = {"created_hypotheses": 0, "created_nodes": 0, "provider": None, "model": None}
@@ -343,7 +528,7 @@ def _run_research_phase(limit_nodes: int, *, loop_idx: int = 1) -> dict[str, Any
         except Exception:
             pass
         heartbeat = loop_idx > 0 and loop_idx % _hb_every == 0
-        # Gera em lotes: uma chamada Claude pode abrir varias raizes, cada uma com
+        # Gera em lotes: uma chamada LLM pode abrir varias raizes, cada uma com
         # filhos por timeframe. Isso reduz tokens desperdicados em chamadas unitarias.
         llm_inflight = _inflight_count(conn, "llm_agent")
         web_inflight = _inflight_count(conn, "web_research")
@@ -355,34 +540,80 @@ def _run_research_phase(limit_nodes: int, *, loop_idx: int = 1) -> dict[str, Any
         )
         # Gate: o pesquisador so espera folhas acionaveis. Pais visited/expanded
         # nao seguram mais a criacao de hipoteses novas.
-        if llm_inflight == 0 and llm_batch > 0:
+        # Boost industrial 2026-05-09: tolera ate AETHER_LLM_INFLIGHT_TOLERANCE
+        # batches concorrentes em vez de exigir 0. Permite paralelismo na geracao
+        # de hipoteses quando o scout esta saturado (default 16 = 2 batches grandes).
+        _inflight_tol = max(0, _env_int("AETHER_LLM_INFLIGHT_TOLERANCE", 16))
+        if llm_inflight <= _inflight_tol and llm_batch > 0:
             set_agent_status(
                 conn,
                 "hypothesis_generator",
                 "running",
                 current_task_id="llm_research",
-                stats={"bubble": f"Chamando Claude para ate {llm_batch} hipoteses.", "phase": "llm_research", "batch_size": llm_batch},
+                stats={"bubble": f"Chamando LLM para ate {llm_batch} hipoteses.", "phase": "llm_research", "batch_size": llm_batch},
             )
             llm_generated = create_llm_hypothesis_batch(conn, max_new=llm_batch, force_exploration=force_exploration)
             candidates = best_candidate_nodes(conn, limit=limit_nodes)
-        elif llm_inflight > 0:
+        elif llm_inflight > _inflight_tol:
             set_agent_status(
                 conn,
                 "hypothesis_generator",
                 "standby",
                 current_task_id=None,
-                stats={"bubble": f"Aguardando folhas acionaveis ({llm_inflight} em teste).", "phase": "awaiting_validation"},
+                stats={"bubble": f"Aguardando folhas acionaveis ({llm_inflight} em teste, tol={_inflight_tol}).", "phase": "awaiting_validation"},
             )
-        if web_inflight == 0 and len(candidates) < limit_nodes:
+        web_every = _web_heartbeat_every(conn)
+        web_heartbeat = web_every > 0 and loop_idx > 0 and loop_idx % web_every == 0
+        web_inflight_tolerance = max(0, _env_int("AETHER_WEB_INFLIGHT_TOLERANCE", 24))
+        should_run_web = len(candidates) < limit_nodes or web_heartbeat
+        if web_inflight <= web_inflight_tolerance and should_run_web:
+            web_backoff = _web_research_backoff_state(conn)
+            if web_backoff.get("active"):
+                set_agent_status(
+                    conn,
+                    "hypothesis_generator",
+                    "standby",
+                    current_task_id=None,
+                    stats={
+                        "bubble": f"Pesquisa web em cooldown ate {web_backoff.get('until')}.",
+                        "phase": "web_backoff",
+                        "zero_count": web_backoff.get("zero_count"),
+                    },
+                )
+            else:
+                shortage_batch = max(1, min(5, math.ceil(max(1, limit_nodes - len(candidates)) / 5)))
+                heartbeat_batch = max(1, _env_int("AETHER_WEB_RESEARCH_HEARTBEAT_BATCH", 1))
+                web_batch = max(shortage_batch if len(candidates) < limit_nodes else 1, heartbeat_batch if web_heartbeat else 1)
+                set_agent_status(
+                    conn,
+                    "hypothesis_generator",
+                    "running",
+                    current_task_id="web_research",
+                    stats={
+                        "bubble": "Pesquisa web continua procurando novas fontes.",
+                        "phase": "web_research",
+                        "batch_size": web_batch,
+                        "inflight": web_inflight,
+                        "tolerance": web_inflight_tolerance,
+                        "heartbeat": web_heartbeat,
+                    },
+                )
+                web_generated = create_web_hypothesis_batch(conn, max_new=web_batch)
+                _record_web_research_result(conn, web_generated)
+                candidates = best_candidate_nodes(conn, limit=limit_nodes)
+        elif web_inflight > web_inflight_tolerance and should_run_web:
             set_agent_status(
                 conn,
                 "hypothesis_generator",
-                "running",
-                current_task_id="web_research",
-                stats={"bubble": "Buscando estrategias na internet.", "phase": "web_research"},
+                "standby",
+                current_task_id=None,
+                stats={
+                    "bubble": f"Pesquisa web aguardando testes ({web_inflight} em voo, tol={web_inflight_tolerance}).",
+                    "phase": "web_awaiting_validation",
+                    "inflight": web_inflight,
+                    "tolerance": web_inflight_tolerance,
+                },
             )
-            web_generated = create_web_hypothesis_batch(conn, max_new=max(1, min(5, math.ceil((limit_nodes - len(candidates)) / 5))))
-            candidates = best_candidate_nodes(conn, limit=limit_nodes)
         if not candidates:
             generated = generate_next_hypothesis_batch(conn, count=1)
             candidates = best_candidate_nodes(conn, limit=limit_nodes)
@@ -424,11 +655,17 @@ def _run_research_phase(limit_nodes: int, *, loop_idx: int = 1) -> dict[str, Any
                 f"{generated} nos locais, {web_generated.get('created_nodes', 0)} nos web, "
                 f"{llm_generated.get('created_nodes', 0)} nos LLM."
             ),
-            payload={"candidates": [node["id"] for node in candidates], "generated": generated, "web": web_generated, "llm": llm_generated},
+            payload={
+                "candidates": [node["id"] for node in candidates],
+                "generated": generated,
+                "web": web_generated,
+                "llm": llm_generated,
+                "weak_prune": weak_prune,
+            },
         )
 
     time.sleep(0.8)
-    return {"candidate_count": len(candidates), "generated_nodes": generated}
+    return {"candidate_count": len(candidates), "generated_nodes": generated, "weak_prune": weak_prune}
 
 
 def queue_scout_tasks(
@@ -624,6 +861,206 @@ def _hard_delete_subtree(conn, root_id: str) -> int:
     n = conn.execute(f"DELETE FROM nodes WHERE id IN ({placeholders})", ids).rowcount
     conn.commit()
     return n
+
+
+def _subtree_ids(conn, root_id: str) -> list[str]:
+    if not root_id:
+        return []
+    seen = {root_id}
+    frontier = [root_id]
+    for _ in range(64):
+        if not frontier:
+            break
+        placeholders = ",".join("?" * len(frontier))
+        children = [
+            row[0]
+            for row in conn.execute(
+                f"SELECT id FROM nodes WHERE parent_id IN ({placeholders})",
+                frontier,
+            ).fetchall()
+        ]
+        frontier = [child for child in children if child not in seen]
+        seen.update(frontier)
+    return list(seen)
+
+
+def _ranking_reset_after(conn, campaign_id: str) -> str | None:
+    try:
+        reset_state = get_setting(conn, f"ranking_hidden_node_ids:{campaign_id}", default={})
+    except Exception:
+        return None
+    if isinstance(reset_state, dict) and reset_state.get("reset_at"):
+        return str(reset_state["reset_at"])
+    return None
+
+
+def _subtree_has_live_or_strong_node(conn, node_ids: list[str], *, strong_score: float) -> bool:
+    if not node_ids:
+        return False
+    placeholders = ",".join("?" * len(node_ids))
+    task_row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n
+        FROM tasks
+        WHERE node_id IN ({placeholders}) AND status IN ('queued','running')
+        """,
+        node_ids,
+    ).fetchone()
+    if task_row and int(task_row["n"] if hasattr(task_row, "keys") else task_row[0]) > 0:
+        return True
+
+    rows = conn.execute(
+        f"""
+        SELECT id, status, score, metrics_json
+        FROM nodes
+        WHERE id IN ({placeholders})
+        """,
+        node_ids,
+    ).fetchall()
+    for row in rows:
+        status = str(row["status"] or "").lower()
+        score = float(row["score"] or 0.0)
+        if status in {"validated", "queued", "running"}:
+            return True
+        if status in {"candidate", "promising", "expand", "expanded"} and score >= strong_score:
+            return True
+        metrics = loads(row["metrics_json"], {})
+        if metrics.get("validation_passed") or metrics.get("critic_status") == "approved":
+            return True
+    return False
+
+
+def prune_weak_branches(conn, *, campaign_id: str | None = None, limit: int | None = None) -> dict[str, Any]:
+    """Remove ramos pos-reset que ja foram scoutados e nao geram resultado bom."""
+    if not _env_enabled("AETHER_WEAK_PRUNE_ENABLED", "1"):
+        return {"enabled": False, "deleted": 0, "branches": 0, "parents": 0, "skipped_live": 0}
+
+    campaign_v = campaign_id or get_active_campaign_id(conn)
+    reset_after = _ranking_reset_after(conn, campaign_v)
+    max_delete = max(1, int(limit or _env_int("AETHER_WEAK_PRUNE_MAX_PER_CYCLE", 12)))
+    min_scouts = max(1, _env_int("AETHER_WEAK_PRUNE_MIN_SCOUTS", 2))
+    stale_scouts = max(min_scouts, _env_int("AETHER_WEAK_PRUNE_STALE_SCOUTS", 3))
+    weak_score = _env_float("AETHER_WEAK_PRUNE_SCORE", 0.32)
+    strong_score = _env_float("AETHER_WEAK_PRUNE_KEEP_SCORE", EXPAND_SCORE_THRESHOLD)
+    reset_clause = "AND created_at > ?" if reset_after else ""
+    params: list[Any] = [campaign_v]
+    if reset_after:
+        params.append(reset_after)
+    params.append(max_delete * 8)
+
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM nodes
+        WHERE campaign_id=?
+          AND id != 'root'
+          AND id NOT LIKE 'tf:%'
+          AND status IN ('candidate','promising','expand','expanded')
+          {reset_clause}
+        ORDER BY score ASC, updated_at ASC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+    deleted = 0
+    branches = 0
+    skipped_live = 0
+    for row in rows:
+        if branches >= max_delete:
+            break
+        node = {key: row[key] for key in row.keys()}
+        metrics = loads(node.pop("metrics_json"), {})
+        scout_count = int(metrics.get("scout_count") or 0)
+        pass_count = int(metrics.get("pass_count") or 0)
+        score = float(node.get("score") or 0.0)
+        prune_reason = str(node.get("prune_reason") or "")
+        if scout_count < min_scouts and not prune_reason:
+            continue
+        weak_after_scouts = scout_count >= min_scouts and score <= weak_score
+        stale_below_expand = scout_count >= stale_scouts and score < strong_score and pass_count <= 0
+        explicit_pruned = bool(prune_reason) and score < strong_score
+        if not (weak_after_scouts or stale_below_expand or explicit_pruned):
+            continue
+        subtree = _subtree_ids(conn, str(node["id"]))
+        if _subtree_has_live_or_strong_node(conn, subtree, strong_score=strong_score):
+            skipped_live += 1
+            continue
+        reason = (
+            f"poda ativa: score={score:.2f}, scouts={scout_count}, "
+            f"passes={pass_count}, status={node.get('status')}"
+        )
+        n = _hard_delete_subtree(conn, str(node["id"]))
+        if n:
+            deleted += n
+            branches += 1
+            add_event(
+                conn,
+                type="weak_branch_pruned",
+                campaign_id=campaign_v,
+                node_id=None,
+                agent_role=node.get("agent_role") or "scorekeeper",
+                message=f"{node.get('name') or node['id']} removido: {reason}.",
+                payload={"node_id": node["id"], "deleted": n, "reason": reason},
+            )
+
+    parents_deleted = 0
+    if branches < max_delete:
+        reset_params: list[Any] = [campaign_v]
+        if reset_after:
+            reset_params.append(reset_after)
+        reset_params.append(max_delete)
+        parent_rows = conn.execute(
+            f"""
+            SELECT id, name, source_type
+            FROM nodes
+            WHERE campaign_id=?
+              AND id != 'root'
+              AND id NOT LIKE 'tf:%'
+              AND parent_id='root'
+              AND status IN ('visited','expanded')
+              AND source_type IN ('llm_agent','web_research')
+              {reset_clause}
+              AND id NOT IN (SELECT DISTINCT parent_id FROM nodes WHERE parent_id IS NOT NULL AND parent_id != '')
+            ORDER BY updated_at ASC
+            LIMIT ?
+            """,
+            reset_params,
+        ).fetchall()
+        for row in parent_rows:
+            if branches + parents_deleted >= max_delete:
+                break
+            node_id = str(row["id"])
+            n = _hard_delete_subtree(conn, node_id)
+            if not n:
+                continue
+            deleted += n
+            parents_deleted += 1
+            add_event(
+                conn,
+                type="weak_parent_pruned",
+                campaign_id=campaign_v,
+                node_id=None,
+                agent_role="archivist_agent",
+                message=f"{row['name'] or node_id} removido: sem filhos ativos apos scouts fracos.",
+                payload={"node_id": node_id, "deleted": n},
+            )
+
+    if deleted:
+        try:
+            conn.execute("DELETE FROM node_embeddings WHERE node_id NOT IN (SELECT id FROM nodes)")
+            conn.commit()
+        except Exception:
+            pass
+
+    return {
+        "enabled": True,
+        "deleted": deleted,
+        "branches": branches,
+        "parents": parents_deleted,
+        "skipped_live": skipped_live,
+        "reset_after": reset_after,
+    }
 
 
 def _apply_scout_result(conn, node: dict[str, Any], sweep: dict[str, Any]) -> None:
@@ -1069,15 +1506,37 @@ def _expand_survivor(
 def _run_queued_scouts(workers: int, max_tasks: int) -> None:
     with connect() as conn:
         ensure_agents(conn)
-        tasks = conn.execute(
-            """
-            SELECT * FROM tasks
-            WHERE status='queued' AND task_type='scout_sweep'
-            ORDER BY priority DESC, created_at ASC
-            LIMIT ?
-            """,
-            (max_tasks,),
-        ).fetchall()
+        campaign_id = get_active_campaign_id(conn)
+        reset_after = None
+        if os.environ.get("AETHER_CYCLE_RESPECT_RANKING_RESET", "1").strip().lower() in {"1", "true", "yes", "on"}:
+            reset_state = get_setting(conn, f"ranking_hidden_node_ids:{campaign_id}", default={})
+            if isinstance(reset_state, dict) and reset_state.get("reset_at"):
+                reset_after = str(reset_state["reset_at"])
+        if reset_after:
+            tasks = conn.execute(
+                """
+                SELECT t.*
+                FROM tasks t
+                JOIN nodes n ON n.id=t.node_id
+                WHERE t.status='queued'
+                  AND t.task_type='scout_sweep'
+                  AND n.campaign_id=?
+                  AND n.created_at > ?
+                ORDER BY t.priority DESC, n.created_at DESC
+                LIMIT ?
+                """,
+                (campaign_id, reset_after, max_tasks),
+            ).fetchall()
+        else:
+            tasks = conn.execute(
+                """
+                SELECT * FROM tasks
+                WHERE status='queued' AND task_type='scout_sweep'
+                ORDER BY priority DESC, created_at ASC
+                LIMIT ?
+                """,
+                (max_tasks,),
+            ).fetchall()
     if not tasks:
         with connect() as conn:
             mark_agents_without_work_standby(conn)
@@ -1142,12 +1601,61 @@ def _run_queued_scouts(workers: int, max_tasks: int) -> None:
             for probe in probes:
                 all_probes.append({**probe, "_task_id": task_id, "_node_id": node_id, "_agent_role": role})
 
+    last_progress_write = {"t": 0.0}
+
+    def on_sweep_progress(progress: dict[str, Any]) -> None:
+        now = time.time()
+        if now - last_progress_write["t"] < 2.0 and progress.get("status") != "completed":
+            return
+        last_progress_write["t"] = now
+        task_progress = progress.get("task_progress") or {}
+        with connect() as conn:
+            for info in task_infos:
+                counts = task_progress.get(info["task_id"]) or {}
+                completed = min(info["probe_count"], int(counts.get("completed") or 0))
+                failed = min(completed, int(counts.get("failed") or 0))
+                partial_sweep = {
+                    "sweep_id": progress.get("sweep_id"),
+                    "workers": progress.get("workers"),
+                    "total": info["probe_count"],
+                    "completed": completed,
+                    "failed": failed,
+                    "eta_seconds": progress.get("eta_seconds"),
+                    "throughput_per_min": progress.get("throughput_per_min"),
+                    "checkpoint_path": progress.get("checkpoint_path"),
+                    "summary": {},
+                }
+                _update_run_row(
+                    conn,
+                    run_id=info["run_id"],
+                    campaign_id=info["campaign_id"],
+                    node_id=info["node_id"],
+                    task_id=info["task_id"],
+                    sweep=partial_sweep,
+                    status="running",
+                )
+                if completed:
+                    set_agent_status(
+                        conn,
+                        info["role"],
+                        "running",
+                        current_task_id=info["task_id"],
+                        stats={
+                            "bubble": f"Testando {completed}/{info['probe_count']} probes.",
+                            "probes": info["probe_count"],
+                            "completed": completed,
+                            "failed": failed,
+                            "sweep_id": progress.get("sweep_id"),
+                        },
+                    )
+
     try:
         sweep = run_sweep(
             probes=all_probes,
             legacy_root=LEGACY_ROOT,
             workers=workers,
             sweep_id=sweep_id,
+            progress_callback=on_sweep_progress,
         )
         results_by_task: dict[str, list[dict[str, Any]]] = {info["task_id"]: [] for info in task_infos}
         for result in sweep.get("results") or []:
@@ -1241,6 +1749,38 @@ def _run_queued_scouts(workers: int, max_tasks: int) -> None:
         mark_agents_without_work_standby(conn)
 
 
+def _continuous_research_interval_seconds() -> float:
+    try:
+        return max(5.0, float(os.environ.get("AETHER_CONTINUOUS_RESEARCH_INTERVAL_SECONDS", "25")))
+    except (TypeError, ValueError):
+        return 25.0
+
+
+def _run_continuous_research_sidecar(limit_nodes: int) -> None:
+    loop_idx = 0
+    interval = _continuous_research_interval_seconds()
+    while not _STOP_EVENT.is_set():
+        loop_idx += 1
+        try:
+            result = _run_research_phase(limit_nodes=limit_nodes, loop_idx=loop_idx)
+            if result.get("skipped") == "research_already_running":
+                _STOP_EVENT.wait(min(5.0, interval))
+            else:
+                _STOP_EVENT.wait(interval)
+        except Exception as exc:
+            try:
+                with connect() as conn:
+                    add_event(
+                        conn,
+                        type="continuous_research_error",
+                        agent_role="hypothesis_generator",
+                        message=str(exc)[:500],
+                    )
+            except Exception:
+                pass
+            _STOP_EVENT.wait(interval)
+
+
 def start_cycle_background(
     *,
     workers: int | None = None,
@@ -1285,8 +1825,17 @@ def start_cycle_background(
 
     def target() -> None:
         global _CYCLE_MODE
+        research_thread: threading.Thread | None = None
         try:
             bootstrap()
+            if continuous and _env_enabled("AETHER_CONTINUOUS_RESEARCH_THREAD", "1"):
+                research_thread = threading.Thread(
+                    target=_run_continuous_research_sidecar,
+                    kwargs={"limit_nodes": effective_limit_nodes},
+                    name="aether-continuous-research",
+                    daemon=True,
+                )
+                research_thread.start()
             loop_idx = 0
             while not _STOP_EVENT.is_set():
                 loop_idx += 1
@@ -1348,6 +1897,9 @@ def start_cycle_background(
                     add_event(conn, type="cycle_stopped", agent_role="chief_orchestrator", message="Ciclo parado por comando humano.")
                 mark_agents_without_work_standby(conn)
         finally:
+            if research_thread is not None and research_thread.is_alive():
+                _STOP_EVENT.set()
+                research_thread.join(timeout=2.0)
             _CYCLE_MODE = "standby"
             _RUN_LOCK.release()
 

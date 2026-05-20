@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import uuid
 from typing import Any
@@ -7,7 +8,7 @@ from typing import Any
 from .campaign_constants import CURRENT_CAMPAIGN_ID
 from .campaigns import get_active_campaign_id, node_campaign_id
 from .config import TIMEFRAMES
-from .db import add_event, dumps, loads, row_to_dict
+from .db import add_event, dumps, get_setting, loads, row_to_dict
 from .llm_traces import list_llm_traces
 from .timeutils import now_iso
 
@@ -449,21 +450,137 @@ def generate_next_hypothesis_batch(conn: sqlite3.Connection, *, count: int = 1) 
     return created * (len(TIMEFRAMES) + 1)
 
 
-def list_state(conn: sqlite3.Connection, campaign_id: str | None = None) -> dict[str, Any]:
+def _compact_state_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    best = metrics.get("best_probe") if isinstance(metrics.get("best_probe"), dict) else {}
+    compact_best = {
+        key: best.get(key)
+        for key in (
+            "symbol",
+            "timeframe",
+            "engine",
+            "params",
+            "dataset_id",
+            "pnl_pct",
+            "trade_count",
+            "mdd_pct",
+            "sharpe",
+            "hit_rate",
+            "fee_bps",
+            "bars",
+            "capital",
+            "final_equity",
+        )
+        if best.get(key) is not None
+    }
+    out = {
+        key: metrics.get(key)
+        for key in (
+            "ok",
+            "error",
+            "critic_status",
+            "critic_reason",
+            "validation_passed",
+            "validation_stage",
+            "validation_reason",
+            "generator",
+            "provider",
+            "model",
+            "invalidation",
+            "probe_count",
+            "ok_count",
+            "combo_count",
+            "failed_count",
+            "pass_count",
+            "pnl_pct",
+            "trade_count",
+            "mdd_pct",
+            "sharpe",
+            "fee_bps",
+            "bars",
+            "source_title",
+            "source_url",
+            "source_query",
+            "source",
+        )
+        if metrics.get(key) is not None
+    }
+    if compact_best:
+        out["best_probe"] = compact_best
+    engines = metrics.get("engines")
+    if isinstance(engines, list):
+        out["engines"] = engines[:6]
+    probe_specs = metrics.get("probe_specs")
+    if isinstance(probe_specs, list):
+        out["probe_specs"] = probe_specs[:8]
+    return out
+
+
+def list_state(
+    conn: sqlite3.Connection,
+    campaign_id: str | None = None,
+    *,
+    max_nodes: int | None = None,
+    compact_metrics: bool | None = None,
+) -> dict[str, Any]:
     campaign_v = campaign_id or get_active_campaign_id(conn)
+    if compact_metrics is None:
+        compact_metrics = os.environ.get("AETHER_STATE_COMPACT_METRICS", "1").strip().lower() not in {"0", "false", "no"}
+    max_nodes_v = max_nodes
+    if max_nodes_v is None:
+        try:
+            max_nodes_v = int(os.environ.get("AETHER_UI_STATE_MAX_NODES", "850"))
+        except (TypeError, ValueError):
+            max_nodes_v = 850
     nodes = []
-    for row in conn.execute(
-        """
-        SELECT * FROM nodes
-        WHERE id='root' OR campaign_id=?
-        ORDER BY depth, code, created_at
-        """,
-        (campaign_v,),
-    ):
+    if max_nodes_v and max_nodes_v > 0:
+        node_rows = conn.execute(
+            """
+            SELECT * FROM nodes
+            WHERE id='root'
+               OR id IN (
+                    SELECT id FROM nodes
+                    WHERE campaign_id=?
+                      AND id != 'root'
+                      AND id NOT LIKE 'tf:%'
+                    ORDER BY
+                      CASE status
+                        WHEN 'validated' THEN 0
+                        WHEN 'running' THEN 1
+                        WHEN 'queued' THEN 2
+                        WHEN 'candidate' THEN 3
+                        WHEN 'visited' THEN 4
+                        WHEN 'expanded' THEN 5
+                        WHEN 'expand' THEN 6
+                        WHEN 'promising' THEN 7
+                        ELSE 8
+                      END,
+                      updated_at DESC
+                    LIMIT ?
+               )
+            ORDER BY depth, code, created_at
+            """,
+            (campaign_v, int(max_nodes_v)),
+        ).fetchall()
+    else:
+        node_rows = conn.execute(
+            """
+            SELECT * FROM nodes
+            WHERE id='root' OR campaign_id=?
+            ORDER BY depth, code, created_at
+            """,
+            (campaign_v,),
+        ).fetchall()
+    for row in node_rows:
         item = row_to_dict(row)
-        item["metrics"] = loads(item.pop("metrics_json"), {})
+        metrics = loads(item.pop("metrics_json"), {})
+        item["metrics"] = _compact_state_metrics(metrics) if compact_metrics else metrics
         item["tags"] = loads(item.pop("tags_json"), [])
         nodes.append(item)
+
+    total_nodes = conn.execute(
+        "SELECT COUNT(*) AS n FROM nodes WHERE id='root' OR campaign_id=?",
+        (campaign_v,),
+    ).fetchone()["n"]
 
     events = []
     for row in conn.execute(
@@ -526,6 +643,9 @@ def list_state(conn: sqlite3.Connection, campaign_id: str | None = None) -> dict
     return {
         "campaign_id": campaign_v,
         "nodes": nodes,
+        "nodes_total": total_nodes,
+        "nodes_truncated": bool(max_nodes_v and max_nodes_v > 0 and total_nodes > len(nodes)),
+        "nodes_limit": max_nodes_v,
         "events": events,
         "tasks": tasks,
         "runs": runs,
@@ -549,21 +669,32 @@ def best_candidate_nodes(
     timeframe dominante monopolizar os slots. `limit` vira teto total.
     """
     campaign_v = campaign_id or get_active_campaign_id(conn)
+    reset_after = None
+    if os.environ.get("AETHER_CYCLE_RESPECT_RANKING_RESET", "1").strip().lower() in {"1", "true", "yes", "on"}:
+        reset_state = get_setting(conn, f"ranking_hidden_node_ids:{campaign_v}", default={})
+        if isinstance(reset_state, dict) and reset_state.get("reset_at"):
+            reset_after = str(reset_state["reset_at"])
     if not per_timeframe:
+        reset_clause = "AND created_at > ?" if reset_after else ""
+        params: list[Any] = [campaign_v]
+        if reset_after:
+            params.append(reset_after)
+        params.append(limit)
         rows = conn.execute(
-            """
+            f"""
             SELECT * FROM nodes
             WHERE status IN ('candidate', 'expand', 'promising')
               AND campaign_id=?
               AND id != 'root'
               AND id NOT LIKE 'tf:%'
+              {reset_clause}
             ORDER BY
               CASE status WHEN 'expand' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END,
               priority DESC,
-              updated_at ASC
+              created_at DESC
             LIMIT ?
             """,
-            (campaign_v, limit),
+            params,
         ).fetchall()
         out = []
         for row in rows:
@@ -573,26 +704,34 @@ def best_candidate_nodes(
             out.append(item)
         return out
 
-    # Spread mode: pega ate `per_tf` candidatos de cada timeframe e intercala
-    timeframes = ["5m", "15m", "1h", "4h", "1d"]
+    # Spread mode: pega ate `per_tf` candidatos de cada timeframe e intercala.
+    # Use a fonte unica de configuracao para nao deixar um worker sem trabalho
+    # quando o gerador criar candidatos para novos timeframes (ex.: 1m).
+    timeframes = list(TIMEFRAMES)
     per_tf = max(1, limit // len(timeframes)) + 1
     buckets: dict[str, list[dict[str, Any]]] = {tf: [] for tf in timeframes}
     for tf in timeframes:
+        reset_clause = "AND created_at > ?" if reset_after else ""
+        params: list[Any] = [campaign_v, tf]
+        if reset_after:
+            params.append(reset_after)
+        params.append(per_tf)
         rows = conn.execute(
-            """
+            f"""
             SELECT * FROM nodes
             WHERE status IN ('candidate', 'expand', 'promising')
               AND campaign_id=?
               AND id != 'root'
               AND id NOT LIKE 'tf:%'
               AND timeframe=?
+              {reset_clause}
             ORDER BY
               CASE status WHEN 'expand' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END,
               priority DESC,
-              updated_at ASC
+              created_at DESC
             LIMIT ?
             """,
-            (campaign_v, tf, per_tf),
+            params,
         ).fetchall()
         for row in rows:
             item = row_to_dict(row)

@@ -1,5 +1,5 @@
-"""Context Broker: agente de contexto unico que conversa com Claude Code
-em UMA sessao reutilizada e despacha tarefas para os demais "papeis"
+"""Context Broker: agente de contexto unico que conversa com o provedor LLM
+configurado e despacha tarefas para os demais "papeis"
 (hypothesis_generator, validation_agent, archivist_agent, etc).
 
 Por que: cada role do Aether hoje abre uma chamada LLM stateless reenviando
@@ -7,10 +7,8 @@ system prompt e contexto da arvore (~120 nodes). Como esse contexto repete
 quase identico entre roles, gastamos tokens replicando-o N vezes por ciclo.
 O broker:
   1. Coleta o snapshot da arvore UMA vez por ciclo (TTL configuravel).
-  2. Mantem uma sessao Claude Code (`--resume <session_id>`) onde o turno 1
-     injeta {snapshot + manual de cada role}. Turnos seguintes so passam o
-     comando ("Atue como X. Tarefa: Y"). Prompt cache + reuso de sessao
-     fazem o resto.
+  2. Reusa sessao quando o transporte suporta isso; caso contrario, injeta o
+     snapshot compacto na propria chamada para manter o comportamento correto.
   3. Expoe `dispatch(role, system, prompt) -> dict` no mesmo formato que
      `call_llm_agent`, para ser usado como caller drop-in.
 
@@ -29,6 +27,7 @@ from .config import db_path
 from .llm_runtime import (
     LLMProvider,
     _provider_for_name,
+    _effective_role_provider_name,
     call_claude_code_result,
     call_codex_cli_result,
     call_openai_codex_result,
@@ -169,18 +168,46 @@ def _max_calls_per_session() -> int:
 
 
 def _provider() -> LLMProvider:
-    return _provider_for_name("claude")
+    return _provider_for_name(os.environ.get("AETHER_BROKER_PROVIDER") or _effective_role_provider_name("hypothesis_generator"))
+
+
+def _provider_supports_session(provider: LLMProvider) -> bool:
+    return provider.name == "claude" and provider.transport in {"claude_code", "cli"}
+
+
+def _direct_call_llm_agent(role: str, *, system: str, prompt: str, max_tokens: int, timeout: float) -> dict[str, Any]:
+    from .llm_runtime import call_llm_agent
+
+    old = os.environ.get("AETHER_CONTEXT_BROKER")
+    os.environ["AETHER_CONTEXT_BROKER"] = "0"
+    try:
+        return call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
+    finally:
+        if old is None:
+            os.environ.pop("AETHER_CONTEXT_BROKER", None)
+        else:
+            os.environ["AETHER_CONTEXT_BROKER"] = old
 
 
 def _call_provider(*, system: str, prompt: str, max_tokens: int, timeout: float) -> dict[str, Any]:
-    """Chama Claude Code (preferido) ou Claude API."""
+    """Chama o provedor LLM configurado para o broker."""
     provider = _provider()
-    if provider.transport in {"claude_code", "cli"}:
+    if provider.name == "claude" and provider.transport in {"claude_code", "cli"}:
         return call_claude_code_result(
             system=system, prompt=prompt, max_tokens=max_tokens,
             timeout=max(timeout, 120.0), provider=provider, role="context_broker",
         )
-    return call_claude_api_result(
+    if provider.name == "claude":
+        return call_claude_api_result(
+            system=system, prompt=prompt, max_tokens=max_tokens,
+            timeout=timeout, provider=provider,
+        )
+    if provider.transport in {"codex_cli", "cli"}:
+        return call_codex_cli_result(
+            system=system, prompt=prompt, max_tokens=max_tokens,
+            timeout=max(timeout, 120.0), provider=provider,
+        )
+    return call_openai_codex_result(
         system=system, prompt=prompt, max_tokens=max_tokens,
         timeout=timeout, provider=provider,
     )
@@ -193,8 +220,7 @@ def dispatch(role: str, *, system: str, prompt: str, max_tokens: int = 700, time
     Fallback automatico para call_llm_agent direto se o broker nao puder ser usado.
     """
     if not is_enabled():
-        from .llm_runtime import call_llm_agent
-        return call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
+        return _direct_call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
 
     try:
         conn = sqlite3.connect(str(db_path()), timeout=15.0)
@@ -214,8 +240,46 @@ def dispatch(role: str, *, system: str, prompt: str, max_tokens: int = 700, time
         finally:
             conn.close()
     except Exception:
-        from .llm_runtime import call_llm_agent
-        return call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
+        return _direct_call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
+
+    provider = _provider()
+    if not _provider_supports_session(provider):
+        task_prompt = (
+            "SNAPSHOT DA ARVORE (use como contexto desta tarefa):\n\n"
+            f"{snapshot}\n\n"
+            f"[ROLE={role}] [TASK]\n"
+            f"Especificacao do papel:\n{system}\n\n"
+            f"Tarefa concreta:\n{prompt}\n\n"
+            "Responda apenas no formato pedido para o papel."
+        )
+        try:
+            result = _call_provider(
+                system=_BROKER_SYSTEM,
+                prompt=task_prompt,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            fallback = _direct_call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
+            meta = fallback.get("metadata") or {}
+            meta["broker_fallback_reason"] = str(exc)[:200]
+            fallback["metadata"] = meta
+            return fallback
+        return {
+            "ok": True,
+            "provider": provider.name,
+            "model": provider.model,
+            "effort": provider.effort,
+            "transport": provider.transport,
+            "text": result.get("text") or "",
+            "error": None,
+            "metadata": {
+                **(result.get("metadata") or {}),
+                "via": "context_broker",
+                "broker_role": role,
+                "broker_stateless_snapshot": True,
+            },
+        }
 
     # Turno 1: prime com manual + snapshot. Turnos seguintes: so a tarefa.
     # System prompt do role original eh agregado ao manual no turno 1
@@ -236,8 +300,7 @@ def dispatch(role: str, *, system: str, prompt: str, max_tokens: int = 700, time
                 _STATE["primed"] = True
                 _STATE["calls_in_session"] = 1
         except Exception:
-            from .llm_runtime import call_llm_agent
-            return call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
+            return _direct_call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
 
     # Turno N: comando curto referenciando snapshot ja conhecido.
     task_prompt = (
@@ -255,8 +318,7 @@ def dispatch(role: str, *, system: str, prompt: str, max_tokens: int = 700, time
         with _LOCK:
             _STATE["primed"] = False
             _STATE["session_id"] = None
-        from .llm_runtime import call_llm_agent
-        fallback = call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
+        fallback = _direct_call_llm_agent(role, system=system, prompt=prompt, max_tokens=max_tokens, timeout=timeout)
         meta = fallback.get("metadata") or {}
         meta["broker_fallback_reason"] = str(exc)[:200]
         fallback["metadata"] = meta

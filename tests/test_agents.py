@@ -889,18 +889,21 @@ def _fake_caller_factory(hypotheses):
     def caller(*args, **kwargs):
         return {
             "ok": True,
-            "provider": "claude",
+            "provider": "openai",
             "model": "test-model",
             "text": json.dumps({"hypotheses": hypotheses}),
         }
     return caller
 
 
-def test_aether_researcher_skips_when_claude_not_configured(tmp_path, monkeypatch):
+def test_aether_researcher_skips_when_openai_not_configured(tmp_path, monkeypatch):
     catalog = tmp_path / "catalog.json"
     monkeypatch.setattr(
         "src.research.aether.llm_runtime.llm_status",
-        lambda: {"providers": {"claude": {"configured": False}}},
+        lambda: {
+            "providers": {"openai": {"configured": False}},
+            "roles": {"hypothesis_generator": {"provider": "openai", "configured": False}},
+        },
     )
 
     findings = AetherResearcherAgent(
@@ -917,12 +920,12 @@ def test_aether_researcher_uses_configured_role_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "src.research.aether.llm_runtime.llm_status",
         lambda: {
-            "providers": {"claude": {"configured": False}, "codex": {"configured": True}},
+            "providers": {"openai": {"configured": True}},
             "roles": {
                 "hypothesis_generator": {
-                    "provider": "claude",
+                    "provider": "openai",
                     "configured": True,
-                    "fallbacks": [{"provider": "codex", "configured": True}],
+                    "fallbacks": [],
                 }
             },
         },
@@ -953,13 +956,16 @@ def test_aether_researcher_uses_configured_role_fallback(tmp_path, monkeypatch):
     assert not catalog.exists()
 
 
-def test_llm_runtime_falls_back_to_codex_when_claude_fails(monkeypatch):
+def test_llm_runtime_falls_back_to_openai_when_claude_fails(monkeypatch):
     from src.research.aether import llm_runtime
 
+    llm_runtime._CB_STATE.clear()
+    monkeypatch.setenv("AETHER_PRIMARY_LLM_PROVIDER", "claude")
+    monkeypatch.setenv("AETHER_LLM_FALLBACK_PROVIDERS", "openai")
     monkeypatch.setenv("AETHER_CLAUDE_TRANSPORT", "api")
+    monkeypatch.setenv("AETHER_OPENAI_TRANSPORT", "api")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
-    monkeypatch.setenv("AETHER_OPENAI_API_FALLBACK_ENABLED", "1")
     monkeypatch.setenv("AETHER_LLM_FALLBACK_ENABLED", "1")
 
     def fail_claude(**kwargs):
@@ -978,9 +984,77 @@ def test_llm_runtime_falls_back_to_codex_when_claude_fails(monkeypatch):
     )
 
     assert response["ok"] is True
-    assert response["provider"] == "codex"
+    assert response["provider"] == "openai"
     assert response["metadata"]["fallback"] is True
     assert "usage limit reached" in response["metadata"]["previous_errors"][0]
+
+
+def test_openai_api_result_records_usage_cost(monkeypatch):
+    from src.research.aether import llm_runtime
+
+    captured = {}
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
+
+    def fake_post_json(url, headers, payload, timeout):
+        captured["payload"] = payload
+        return {
+            "id": "resp_test",
+            "output_text": '{"hypotheses": []}',
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 200,
+                "input_tokens_details": {"cached_tokens": 400},
+            },
+        }
+
+    monkeypatch.setattr(llm_runtime, "_post_json", fake_post_json)
+    provider = llm_runtime.LLMProvider(
+        name="openai",
+        label="OpenAI",
+        model="gpt-5.4-mini",
+        effort=None,
+        key_env="OPENAI_API_KEY",
+        configured=True,
+        transport="api",
+    )
+
+    result = llm_runtime.call_openai_codex_result(
+        system="system",
+        prompt="prompt",
+        max_tokens=50,
+        provider=provider,
+    )
+
+    assert captured["payload"]["model"] == "gpt-5.4-mini"
+    assert result["text"] == '{"hypotheses": []}'
+    assert result["metadata"]["usage"]["input_tokens"] == 1000
+    assert result["metadata"]["cost_usd"] == 0.00138
+
+
+def test_llm_runtime_auth_error_opens_long_circuit(monkeypatch):
+    from src.research.aether import llm_runtime
+
+    llm_runtime._CB_STATE.clear()
+    calls = {"n": 0}
+    monkeypatch.setenv("AETHER_PRIMARY_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("AETHER_OPENAI_TRANSPORT", "api")
+    monkeypatch.setenv("OPENAI_API_KEY", "bad-key")
+    monkeypatch.setenv("AETHER_LLM_AUTH_COOLDOWN", "600")
+    monkeypatch.delenv("AETHER_LLM_FALLBACK_PROVIDERS", raising=False)
+
+    def fail_openai(**kwargs):
+        calls["n"] += 1
+        raise RuntimeError("401 Unauthorized: Incorrect API key provided")
+
+    monkeypatch.setattr(llm_runtime, "call_openai_codex_result", fail_openai)
+
+    first = llm_runtime.call_llm_agent("hypothesis_generator", system="s", prompt="p")
+    second = llm_runtime.call_llm_agent("hypothesis_generator", system="s", prompt="p")
+
+    assert first["ok"] is False
+    assert second["ok"] is False
+    assert calls["n"] == 1
+    assert "circuit breaker aberto" in second["error"]
 
 
 def test_claude_code_does_not_inherit_external_api_keys(monkeypatch):
@@ -1045,11 +1119,42 @@ def test_codex_cli_does_not_inherit_openai_api_keys(monkeypatch):
     assert "AETHER_OPENAI_API_KEY" not in captured["env"]
 
 
+def test_codex_cli_uses_explicit_path(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from src.research.aether import llm_runtime
+
+    fake_cli = tmp_path / "codex.exe"
+    fake_cli.write_text("", encoding="utf-8")
+    captured = {}
+    monkeypatch.setenv("AETHER_CODEX_CLI_PATH", str(fake_cli))
+    monkeypatch.setenv("AETHER_OPENAI_TRANSPORT", "codex_cli")
+    monkeypatch.setattr(llm_runtime.shutil, "which", lambda name: None)
+    monkeypatch.setattr(llm_runtime, "_cli_usable", lambda path: path == str(fake_cli))
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args[0]
+        output_path = args[0][args[0].index("-o") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write("OK")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(llm_runtime.subprocess, "run", fake_run)
+
+    provider = llm_runtime._provider_for_name("openai")
+    result = llm_runtime.call_codex_cli_result(system="system", prompt="prompt", provider=provider)
+
+    assert provider.configured is True
+    assert provider.cli_path == str(fake_cli)
+    assert captured["args"][0] == str(fake_cli)
+    assert result["text"] == "OK"
+
+
 def test_aether_researcher_returns_preview_without_writing(tmp_path, monkeypatch):
     catalog = tmp_path / "catalog.json"
     monkeypatch.setattr(
         "src.research.aether.llm_runtime.llm_status",
-        lambda: {"providers": {"claude": {"configured": True}}},
+        lambda: {"providers": {"openai": {"configured": True}}},
     )
     monkeypatch.delenv("AETHER_RESEARCHER_WRITE_ENABLED", raising=False)
 
@@ -1081,7 +1186,7 @@ def test_aether_researcher_writes_when_flag_enabled(tmp_path, monkeypatch):
     catalog = tmp_path / "catalog.json"
     monkeypatch.setattr(
         "src.research.aether.llm_runtime.llm_status",
-        lambda: {"providers": {"claude": {"configured": True}}},
+        lambda: {"providers": {"openai": {"configured": True}}},
     )
     monkeypatch.setenv("AETHER_RESEARCHER_WRITE_ENABLED", "1")
 
@@ -1120,7 +1225,7 @@ def test_aether_researcher_filters_unknown_template(tmp_path, monkeypatch):
     catalog = tmp_path / "catalog.json"
     monkeypatch.setattr(
         "src.research.aether.llm_runtime.llm_status",
-        lambda: {"providers": {"claude": {"configured": True}}},
+        lambda: {"providers": {"openai": {"configured": True}}},
     )
     monkeypatch.setenv("AETHER_RESEARCHER_WRITE_ENABLED", "1")
 

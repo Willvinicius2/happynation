@@ -19,6 +19,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +32,10 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "src" / "logs" / "research" / "active_strategies.json"
 STATE = ROOT / "src" / "logs" / "paper_balance" / "state.json"
 TRADES = ROOT / "src" / "logs" / "paper_balance" / "trades.csv"
+AETHER_RANKING_URL = (
+    "http://127.0.0.1:8765/api/ranking"
+    "?capital=1000&limit=250&campaign_id=active&dedupe=true&hide_blocked=false&discoveries_limit=80"
+)
 
 
 def section(title: str) -> None:
@@ -43,10 +49,11 @@ def list_aether_processes() -> list[dict]:
     cmd = [
         "powershell", "-NoProfile", "-Command",
         "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-        "Where-Object { $_.CommandLine -match 'aether|src\\.main|aether_promote|run_critic' } | "
+        "Where-Object { $_.CommandLine -match 'aether|src\\.main|src\\.dashboard|aether_promote|run_critic|scripts\\._watchdog_stack|_watchdog_stack' } | "
         "Select-Object ProcessId,ParentProcessId,@{N='Module';E={ if ($_.CommandLine -match 'src\\.research\\.aether\\.(\\w+)') { 'aether.' + $matches[1] } "
         "elseif ($_.CommandLine -match 'src\\.main') { 'bot' } "
         "elseif ($_.CommandLine -match 'aether_promote_with_validation') { 'promote_loop' } "
+        "elseif ($_.CommandLine -match 'scripts\\._watchdog_stack|_watchdog_stack') { 'deploy_watchdog' } "
         "elseif ($_.CommandLine -match 'src\\.dashboard') { 'dashboard' } "
         "else { 'other' } }} | ConvertTo-Json -Compress"
     ]
@@ -71,7 +78,8 @@ def show_processes() -> None:
         by_module[p.get("Module", "other")].append(p.get("ProcessId"))
 
     expected = ["aether.server", "aether.auto_validator", "aether.hyper_agent",
-                "aether.critic_agent", "promote_loop", "bot", "dashboard"]
+                "aether.critic_agent", "aether.auto_deploy", "deploy_watchdog",
+                "promote_loop", "bot", "dashboard"]
     for mod in expected:
         pids = by_module.get(mod, [])
         flag = "OK" if pids else "FALTA"
@@ -83,7 +91,7 @@ def show_processes() -> None:
 
 
 def show_manifest() -> None:
-    section("MANIFEST AETHER")
+    section("MANIFEST BOT/PAPER ATIVO")
     if not MANIFEST.exists():
         print("  manifest nao existe")
         return
@@ -101,6 +109,25 @@ def show_manifest() -> None:
     print(f"  por engine:")
     for eng, n in sorted(by_engine.items(), key=lambda x: -x[1]):
         print(f"    {eng}: {n}")
+
+
+def show_aether_ranking() -> None:
+    section("RANKING VISUAL AETHER")
+    try:
+        with urllib.request.urlopen(AETHER_RANKING_URL, timeout=8) as res:
+            data = json.loads(res.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        print(f"  indisponivel: {exc}")
+        return
+
+    reset = data.get("ranking_reset") or {}
+    reset_flag = "ativo" if reset.get("active") else "inativo"
+    print(f"  reset visual: {reset_flag}")
+    if reset.get("active"):
+        print(f"  antigas ocultas: {reset.get('hidden_count', 0)}")
+        print(f"  reset_at: {reset.get('reset_at', '-')}")
+    print(f"  novas aprovadas no ranking: {data.get('count', 0)}")
+    print(f"  novas descobertas no pipeline: {len(data.get('discoveries') or [])}")
 
 
 def show_paused() -> None:
@@ -213,6 +240,7 @@ def main() -> int:
 
     show_processes()
     show_manifest()
+    show_aether_ranking()
     show_paused()
     show_balance()
     show_trades(args.hours)

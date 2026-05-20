@@ -85,8 +85,18 @@ def deploy(entry: CatalogEntry, path: Path | None = None, max_per_template: int 
     return record
 
 
-def deploy_record(record: dict[str, Any], path: Path | None = None, max_per_family: int | None = 5) -> dict[str, Any]:
-    """Adiciona um registro serializado ao manifest ativo."""
+def deploy_record(record: dict[str, Any], path: Path | None = None, max_per_family: int | None = None) -> dict[str, Any]:
+    """Adiciona um registro serializado ao manifest ativo.
+
+    `max_per_family` aceita override via env DEPLOY_RECORD_MAX_PER_FAMILY
+    (0 ou negativo = sem cap). Default 5 mantido pra compatibilidade.
+    """
+    if max_per_family is None:
+        try:
+            env_val = int(os.environ.get("DEPLOY_RECORD_MAX_PER_FAMILY", "5"))
+        except (TypeError, ValueError):
+            env_val = 5
+        max_per_family = env_val if env_val > 0 else None
     target = path or DEFAULT_PATH
     payload = dict(record)
     payload.setdefault("source", "manual")

@@ -11,11 +11,21 @@ mermaid.initialize({
   mindmap: { padding: 12 },
 });
 
+function rankingCampaignFromStorage() {
+  const saved = localStorage.getItem("aetherRankingCampaign") || "active";
+  return ["all", "legacy_pre_aether"].includes(saved) ? "active" : saved;
+}
+
+function rankingTabFromStorage() {
+  return localStorage.getItem("aetherRankingTab") === "discoveries" ? "discoveries" : "validated";
+}
+
 const state = {
   data: null,
   ranking: null,
   campaigns: null,
-  rankingCampaign: localStorage.getItem("aetherRankingCampaign") || "active",
+  rankingCampaign: rankingCampaignFromStorage(),
+  rankingTab: rankingTabFromStorage(),
   // Default = mindmap. Tree foi descontinuada visualmente (legivel so com poucos nodes).
   viewMode: window.location.hash === "#ranking" ? "ranking" : (window.location.hash === "#tree" ? "tree" : "mindmap"),
   selected: null,
@@ -35,8 +45,21 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+function cacheBust(path) {
+  const sep = String(path).includes("?") ? "&" : "?";
+  return `${path}${sep}_=${Date.now()}`;
+}
+
 async function api(path, opts = {}) {
-  const res = await fetch(path, opts);
+  const method = String(opts.method || "GET").toUpperCase();
+  const res = await fetch(method === "GET" ? cacheBust(path) : path, {
+    cache: "no-store",
+    ...opts,
+    headers: {
+      "Cache-Control": "no-cache",
+      ...(opts.headers || {}),
+    },
+  });
   if (!res.ok) throw new Error(await res.text());
   return await res.json();
 }
@@ -68,7 +91,7 @@ function money(value) {
 
 function readinessLabel(value) {
   return {
-    paper_ready: "Pronta",
+    paper_ready: "Validada",
     needs_review: "Revisar",
     archive: "Arquivo",
   }[value] || value;
@@ -80,6 +103,24 @@ function bucketLabel(value) {
     web: "Web",
     aether: "Aether",
   }[value] || value || "Aether";
+}
+
+function discoveryStageLabel(value) {
+  return {
+    "critic aprovado": "Critic aprovado",
+    validada: "Validada",
+    backtest: "Backtest",
+    scout: "Scout",
+    explorando: "Explorando",
+  }[value] || value || "Pipeline";
+}
+
+function discoverySourceLabel(row) {
+  const source = String(row?.source_path || row?.source_type || "").toLowerCase();
+  if (source === "openai" || source.includes("openai")) return "OpenAI";
+  if (source.includes("web")) return "Web";
+  if (source.includes("legacy")) return "Legado";
+  return "Aether";
 }
 
 function compactModel(value) {
@@ -103,6 +144,154 @@ function traceSummary(trace) {
     if (first) return `${first.name || first.slug || "Hipotese"}: ${first.hypothesis || ""}`;
   } catch (_) {}
   return trace.summary || output || trace.error || "Sem resumo.";
+}
+
+function numValue(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtNumber(value, digits = 2) {
+  const n = numValue(value);
+  return n == null ? "-" : n.toFixed(digits);
+}
+
+function fmtPct(value) {
+  const n = numValue(value);
+  return n == null ? "-" : `${n.toFixed(2)}%`;
+}
+
+function compactJson(value, max = 120) {
+  if (value == null || value === "") return "-";
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return shortText(text, max);
+}
+
+function probeLabel(probe) {
+  if (!probe || typeof probe !== "object") return "-";
+  const bits = [
+    probe.symbol,
+    probe.timeframe,
+    probe.engine,
+    probe.params ? compactJson(probe.params, 72) : null,
+  ].filter(Boolean);
+  return bits.join(" / ") || compactJson(probe, 120);
+}
+
+function latestNodeTasks(nodeId) {
+  return (state.data?.tasks || [])
+    .filter((t) => t.node_id === nodeId)
+    .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
+}
+
+function latestNodeRuns(nodeId) {
+  return (state.data?.runs || [])
+    .filter((r) => r.node_id === nodeId)
+    .sort((a, b) => String(b.started_at || "").localeCompare(String(a.started_at || "")));
+}
+
+function latestNodeEvents(nodeId) {
+  return (state.data?.events || [])
+    .filter((e) => e.node_id === nodeId)
+    .slice(0, 6);
+}
+
+function nodeArtifacts(nodeId) {
+  return (state.data?.artifacts || []).filter((a) => a.node_id === nodeId).slice(0, 4);
+}
+
+function gateState(ok) {
+  if (ok === true) return "pass";
+  if (ok === false) return "fail";
+  return "wait";
+}
+
+function renderGate(label, ok, detail) {
+  const stateName = gateState(ok);
+  const badge = stateName === "pass" ? "PASS" : stateName === "fail" ? "RECUSA" : "AGUARDA";
+  return `
+    <div class="gateRow ${stateName}">
+      <span>${escapeHtml(badge)}</span>
+      <strong>${escapeHtml(label)}</strong>
+      <small>${escapeHtml(detail || "-")}</small>
+    </div>
+  `;
+}
+
+function buildGateRows(n) {
+  const m = n.metrics || {};
+  const best = m.best_probe || {};
+  const trades = numValue(m.trade_count ?? best.trade_count);
+  const pnl = numValue(m.pnl_pct ?? best.pnl_pct);
+  const sharpe = numValue(m.sharpe ?? best.sharpe);
+  const mdd = numValue(m.mdd_pct ?? best.mdd_pct);
+  const score = numValue(n.score);
+  const rows = [];
+  rows.push(renderGate("Scout tecnico", m.ok === false ? false : (m.probe_count ? true : null), m.ok === false ? (m.error || "falha tecnica") : `${m.ok_count ?? "-"} ok / ${m.probe_count ?? "-"} probes`));
+  rows.push(renderGate("Trades minimos do scout", trades == null ? null : trades >= 6, `${trades ?? "-"} / 6`));
+  rows.push(renderGate("PnL scout nao pode sangrar", pnl == null ? null : pnl > -3, `${fmtPct(pnl)} > -3.00%`));
+  rows.push(renderGate("Sharpe scout", sharpe == null ? null : sharpe >= 0.05, `${fmtNumber(sharpe)} >= 0.05`));
+  rows.push(renderGate("Drawdown scout", mdd == null ? null : mdd <= 35, `${fmtPct(mdd)} <= 35.00%`));
+  rows.push(renderGate("Score de sobrevivencia", score == null ? null : score >= 0.12, `${fmtNumber(score)} >= 0.12`));
+  rows.push(renderGate("Validacao profunda", m.validation_passed === true ? true : (m.validation_stage ? false : null), `${m.validation_stage || "pendente"}${m.validation_reason ? " / " + m.validation_reason : ""}`));
+  rows.push(renderGate("Trades para paper", trades == null ? null : trades >= 30, `${trades ?? "-"} / 30`));
+  rows.push(renderGate("Score para paper", score == null ? null : score >= 0.42, `${fmtNumber(score)} >= 0.42`));
+  rows.push(renderGate("Critic out-of-sample", m.critic_status === "approved" ? true : (m.critic_status === "rejected" ? false : null), m.critic_reason || m.critic_status || "pendente"));
+  return rows.join("");
+}
+
+function renderNodeDetails(n) {
+  const m = n.metrics || {};
+  const best = m.best_probe || {};
+  const tasks = latestNodeTasks(n.id);
+  const runs = latestNodeRuns(n.id);
+  const events = latestNodeEvents(n.id);
+  const artifacts = nodeArtifacts(n.id);
+  const task = tasks[0] || null;
+  const run = runs[0] || null;
+  const probes = (task?.payload?.probes || m.probe_specs || []).slice(0, 5);
+  const engines = m.engines || (best.engine ? [best.engine] : []);
+  const sourceTitle = m.source_title || artifacts.find((a) => a.kind === "web_source")?.title || n.source_path || "-";
+  const sourceUrl = m.source_url || artifacts.find((a) => a.kind === "web_source")?.path || n.source_path || "";
+  const sourceHtml = sourceUrl && /^https?:\/\//i.test(sourceUrl)
+    ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(shortText(sourceTitle, 72))}</a>`
+    : escapeHtml(shortText(sourceTitle, 72));
+
+  $("nodeDetails").innerHTML = `
+    <div class="detailBlock">
+      <div class="detailTitle">Pesquisa</div>
+      <div class="detailRows">
+        <div><span>Origem</span><strong>${escapeHtml(n.source_type || m.generator || "aether")}</strong></div>
+        <div><span>Modelo</span><strong>${escapeHtml(m.model || m.provider || "-")}</strong></div>
+        <div><span>Fonte</span><strong>${sourceHtml}</strong></div>
+        <div><span>Engines</span><strong>${escapeHtml((engines || []).join(", ") || "-")}</strong></div>
+        <div><span>Invalida se</span><strong>${escapeHtml(m.invalidation || "-")}</strong></div>
+        <div><span>Params atuais</span><strong>${escapeHtml(compactJson(best.params, 160))}</strong></div>
+      </div>
+    </div>
+    <div class="detailBlock">
+      <div class="detailTitle">Teste agora</div>
+      <div class="detailRows">
+        <div><span>Tarefa</span><strong>${escapeHtml(task ? `${task.status} / ${task.task_type}` : "sem tarefa ativa")}</strong></div>
+        <div><span>Run</span><strong>${escapeHtml(run ? `${run.status} ${run.completed}/${run.total}` : "sem run recente")}</strong></div>
+        <div><span>Throughput</span><strong>${escapeHtml(run?.throughput_per_min ? `${run.throughput_per_min} probes/min` : "-")}</strong></div>
+        <div><span>Best probe</span><strong>${escapeHtml(probeLabel(best))}</strong></div>
+      </div>
+      <div class="probeList">
+        ${probes.length ? probes.map((p) => `<div>${escapeHtml(probeLabel(p))}</div>`).join("") : `<div>Sem probes carregados neste snapshot.</div>`}
+      </div>
+    </div>
+    <div class="detailBlock">
+      <div class="detailTitle">Checklist de aprovacao</div>
+      <div class="gateList">${buildGateRows(n)}</div>
+    </div>
+    <div class="detailBlock">
+      <div class="detailTitle">Historico recente</div>
+      <div class="eventList">
+        ${events.length ? events.map((e) => `<div><strong>${escapeHtml(e.type)}</strong><span>${escapeHtml(shortText(e.message, 120))}</span></div>`).join("") : `<div><span>Sem evento recente para este node.</span></div>`}
+      </div>
+    </div>
+  `;
 }
 
 function computeActivity(data) {
@@ -210,6 +399,24 @@ function ageHuman(ms) {
   if (h < 48) return `${h}h ${m % 60}min`;
   const d = Math.floor(h / 24);
   return `${d}d ${h % 24}h`;
+}
+
+function formatDateTime(value) {
+  const t = parseTs(value);
+  if (!t) return "--";
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(t));
+}
+
+function isAfterReset(row, reset) {
+  if (!reset?.active || !reset.reset_at) return true;
+  const resetTs = parseTs(reset.reset_at);
+  const rowTs = parseTs(row?.created_at || row?.updated_at);
+  return Boolean(resetTs && rowTs && rowTs > resetTs);
 }
 
 function computeHealth(data) {
@@ -732,6 +939,11 @@ function renderDetails(n) {
   $("nodeMeta").innerHTML = meta
     .map(([k, v]) => `<div><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></div>`)
     .join("");
+  if (n.virtual) {
+    $("nodeDetails").innerHTML = `<div class="detailBlock"><div class="detailTitle">Grupo visual</div><p>Abra o grupo e clique em um node real para ver testes, probes e gates.</p></div>`;
+  } else {
+    renderNodeDetails(n);
+  }
 }
 
 function agentBubble(agent) {
@@ -838,7 +1050,7 @@ function renderSidebars() {
         <span>${escapeHtml(t.status)}</span>
       </div>
       <div class="traceMeta">
-        <span>${escapeHtml(t.provider || "claude")}</span>
+        <span>${escapeHtml(t.provider || "openai")}</span>
         <span>${escapeHtml(compactModel(t.model))}</span>
         <span>${escapeHtml((t.metadata && t.metadata.effort) || "xhigh")}</span>
       </div>
@@ -849,7 +1061,7 @@ function renderSidebars() {
         <pre>${escapeHtml(t.output_excerpt || t.error || "")}</pre>
       </details>
     </div>
-  `).join("") : "<div class=\"emptyTrace\">Nenhuma chamada Claude nesta campanha.</div>";
+  `).join("") : "<div class=\"emptyTrace\">Nenhuma chamada LLM nesta campanha.</div>";
 
   $("runs").innerHTML = state.data.runs.slice(0, 8).map(r => `
     <div class="run">
@@ -864,21 +1076,83 @@ function renderSidebars() {
   `).join("");
 }
 
-function renderRanking() {
+function renderRankingLegacy() {
   if (!state.ranking) {
     $("rankingList").innerHTML = "<div class=\"emptyRanking\">Carregando ranking...</div>";
     return;
   }
   const summary = state.ranking.summary || {};
+  const discoverySummary = state.ranking.discovery_summary || {};
+  const reset = state.ranking.ranking_reset || {};
   $("rankingSummary").textContent = [
     `${state.ranking.count || 0} estrategias`,
     `${summary.deployed || 0} no bot`,
     `${summary.not_deployed || 0} aguardando deploy`,
+    `${discoverySummary.recent || 0} descobertas recentes`,
+    reset.active ? `${reset.hidden_count || 0} antigas ocultas` : null,
     `${summary.duplicates_hidden || 0} duplicatas ocultas`,
-  ].join(" / ");
+  ].filter(Boolean).join(" / ");
+  const discoveries = state.ranking.discoveries || [];
+  const strip = $("discoveryStrip");
+  if (strip) {
+    strip.innerHTML = `
+      <div class="discoveryHead">
+        <div>
+          <span class="eyebrow">${reset.active ? "Novas depois do reset" : "Descobertas recentes"}</span>
+          <strong>${escapeHtml(discoverySummary.recent || 0)} nodes novos no pipeline</strong>
+          ${discoverySummary.new_only_since ? `<small>Desde ${escapeHtml(discoverySummary.new_only_since)}</small>` : ""}
+        </div>
+        <div class="discoveryStats">
+          <span>${escapeHtml(discoverySummary.openai || 0)} OpenAI</span>
+          <span>${escapeHtml(discoverySummary.with_backtest || 0)} com backtest</span>
+          <span>${escapeHtml(discoverySummary.validated || 0)} validados</span>
+          <span>${escapeHtml(discoverySummary.deployed || 0)} no bot</span>
+        </div>
+      </div>
+      <div class="discoveryList">
+        ${discoveries.length ? discoveries.slice(0, 12).map((d) => {
+          const ts = parseTs(d.updated_at);
+          const age = ts ? ageHuman(Date.now() - ts) : "--";
+          const pnl = d.pnl_pct == null ? "-" : `${Number(d.pnl_pct || 0).toFixed(2)}%`;
+          const trades = d.trade_count == null ? "-" : `${escapeHtml(d.trade_count)} trades`;
+          const detail = d.hypothesis || d.summary || d.causal_mechanism || d.node_id;
+          const mechanism = d.causal_mechanism || d.mutation_from_parent || "";
+          return `
+            <article class="discoveryCard ${escapeHtml(d.status || "")} ${d.deployed ? "deployed" : ""}" data-node="${escapeHtml(d.node_id)}">
+              <div class="discoveryTop">
+                <strong>${escapeHtml(d.name || d.node_id)}</strong>
+                <span>${escapeHtml(discoveryStageLabel(d.stage))}</span>
+              </div>
+              <p>${escapeHtml(shortText(detail, 220))}</p>
+              ${mechanism ? `<small>${escapeHtml(shortText(mechanism, 180))}</small>` : ""}
+              <div class="discoveryMeta">
+                <span>${escapeHtml(discoverySourceLabel(d))}</span>
+                <span>${escapeHtml(d.asset || "-")}</span>
+                <span>${escapeHtml(d.timeframe || "-")}</span>
+                <span>${escapeHtml(d.engine || "-")}</span>
+                <span>score ${Number(d.score || 0).toFixed(2)}</span>
+                <span>pnl ${escapeHtml(pnl)}</span>
+                <span>${trades}</span>
+                <span>${escapeHtml(age)}</span>
+              </div>
+            </article>
+          `;
+        }).join("") : "<div class=\"emptyRanking\">Nenhuma descoberta recente nesta campanha.</div>"}
+      </div>
+    `;
+    for (const card of document.querySelectorAll(".discoveryCard")) {
+      card.addEventListener("click", () => {
+        state.selected = card.dataset.node;
+        const n = state.data?.nodes?.find((node) => node.id === state.selected);
+        if (n) renderDetails(n);
+      });
+    }
+  }
   const rows = state.ranking.strategies || [];
   if (!rows.length) {
-    $("rankingList").innerHTML = "<div class=\"emptyRanking\">Nenhuma estrategia aprovada para teste ainda.</div>";
+    $("rankingList").innerHTML = reset.active
+      ? "<div class=\"emptyRanking\">Ranking visual zerado. As proximas estrategias aprovadas vao aparecer aqui.</div>"
+      : "<div class=\"emptyRanking\">Nenhuma estrategia aprovada para teste ainda.</div>";
     return;
   }
   $("rankingList").innerHTML = rows.map((r, index) => `
@@ -928,6 +1202,188 @@ function renderRanking() {
   }
 }
 
+function syncRankingTabs() {
+  const activeTab = state.rankingTab === "discoveries" ? "discoveries" : "validated";
+  for (const btn of document.querySelectorAll("[data-ranking-tab]")) {
+    btn.classList.toggle("active", btn.dataset.rankingTab === activeTab);
+    btn.setAttribute("aria-selected", btn.dataset.rankingTab === activeTab ? "true" : "false");
+  }
+  const validatedPane = $("rankingPaneValidated");
+  const discoveriesPane = $("rankingPaneDiscoveries");
+  if (validatedPane) validatedPane.classList.toggle("hidden", activeTab !== "validated");
+  if (discoveriesPane) discoveriesPane.classList.toggle("hidden", activeTab !== "discoveries");
+}
+
+function setRankingTab(tab) {
+  state.rankingTab = tab === "discoveries" ? "discoveries" : "validated";
+  localStorage.setItem("aetherRankingTab", state.rankingTab);
+  syncRankingTabs();
+  renderRanking();
+}
+
+function renderRanking() {
+  if (!state.ranking) {
+    $("rankingList").innerHTML = "<div class=\"emptyRanking\">Carregando ranking novo...</div>";
+    return;
+  }
+
+  const summary = state.ranking.summary || {};
+  const discoverySummary = state.ranking.discovery_summary || {};
+  const reset = state.ranking.ranking_reset || {};
+  const resetLabel = reset.active ? formatDateTime(reset.reset_at) : "";
+  const rows = (state.ranking.strategies || []).filter((row) => isAfterReset(row, reset));
+  const discoveries = (state.ranking.discoveries || []).filter((row) => isAfterReset(row, reset));
+  const rankedCount = rows.length;
+  const manifestTotal = summary.active_manifest_total ?? summary.deployed ?? 0;
+  const deployedInRanking = summary.deployed_in_ranking ?? summary.deployed ?? 0;
+  const manifestOutsideRanking = summary.active_manifest_outside_ranking ?? Math.max(0, manifestTotal - deployedInRanking);
+  const latestRankedAt = summary.latest_ranked_at ? formatDateTime(summary.latest_ranked_at) : "--";
+  const discoveryCount = discoveries.length || discoverySummary.recent || 0;
+
+  if ($("rankingTabValidatedCount")) $("rankingTabValidatedCount").textContent = rankedCount;
+  if ($("rankingTabDiscoveriesCount")) $("rankingTabDiscoveriesCount").textContent = discoveryCount;
+  syncRankingTabs();
+
+  $("rankingSummary").textContent = state.rankingTab === "discoveries"
+    ? [
+        reset.active ? "Somente descobertas depois da limpeza" : "Pipeline separado do ranking",
+        `${discoveryCount} descobertas recentes`,
+        `${discoverySummary.with_backtest || 0} com backtest`,
+        `${discoverySummary.validated || 0} validadas`,
+        resetLabel && resetLabel !== "--" ? `desde ${resetLabel}` : null,
+      ].filter(Boolean).join(" / ")
+    : reset.active
+    ? [
+        "Modo novo ativo",
+        `${reset.hidden_count || 0} antigas escondidas`,
+        `${rankedCount} novas validadas`,
+        resetLabel && resetLabel !== "--" ? `reset ${resetLabel}` : null,
+      ].filter(Boolean).join(" / ")
+    : [
+        `${rankedCount} estrategias validadas no ranking`,
+        `${manifestTotal} ativas no bot`,
+        `${deployedInRanking} cruzam com ranking`,
+        manifestOutsideRanking ? `${manifestOutsideRanking} ativas fora/duplicadas` : null,
+        `${summary.not_deployed || 0} validadas fora do bot`,
+        latestRankedAt !== "--" ? `ultima validada ${latestRankedAt}` : null,
+      ].filter(Boolean).join(" / ");
+
+  const deployBtn = $("deployRankingBtn");
+  if (deployBtn) {
+    deployBtn.textContent = reset.active ? "Ativar novas no bot" : "Ativar no bot";
+    deployBtn.disabled = rows.length === 0 || state.rankingTab !== "validated";
+  }
+
+  const strip = $("discoveryStrip");
+  if (strip) {
+    const discoveryEmpty = reset.active
+      ? `<div class="emptyRanking newOnlyEmpty"><strong>Aguardando descoberta nova</strong><span>Nada criado depois do reset (${escapeHtml(resetLabel)}) entrou no pipeline ainda. O proximo ciclo vai preencher esta faixa com scout, backtest e critic.</span></div>`
+      : "<div class=\"emptyRanking\">Nenhuma descoberta recente nesta campanha.</div>";
+    strip.innerHTML = `
+      <div class="discoveryHead">
+        <div>
+          <span class="eyebrow">${reset.active ? "Somente novas" : "Descobertas recentes"}</span>
+          <strong>${escapeHtml(discoveries.length)} descobertas no pipeline</strong>
+          ${reset.active ? `<small>Antigas bloqueadas na tela desde ${escapeHtml(resetLabel)}</small>` : ""}
+        </div>
+        <div class="discoveryStats">
+          <span>${escapeHtml(discoverySummary.openai || 0)} OpenAI</span>
+          <span>${escapeHtml(discoverySummary.with_backtest || 0)} com backtest</span>
+          <span>${escapeHtml(discoverySummary.validated || 0)} validadas</span>
+          <span>${escapeHtml(discoverySummary.deployed || 0)} ja no bot</span>
+        </div>
+      </div>
+      <div class="discoveryList">
+        ${discoveries.length ? discoveries.slice(0, 12).map((d) => {
+          const ts = parseTs(d.updated_at);
+          const age = ts ? ageHuman(Date.now() - ts) : "--";
+          const pnl = d.pnl_pct == null ? "-" : `${Number(d.pnl_pct || 0).toFixed(2)}%`;
+          const trades = d.trade_count == null ? "-" : `${escapeHtml(d.trade_count)} trades`;
+          const detail = d.hypothesis || d.summary || d.causal_mechanism || d.node_id;
+          const mechanism = d.causal_mechanism || d.mutation_from_parent || "";
+          return `
+            <article class="discoveryCard ${escapeHtml(d.status || "")} ${d.deployed ? "deployed" : ""}" data-node="${escapeHtml(d.node_id)}">
+              <div class="discoveryTop">
+                <strong>${escapeHtml(d.name || d.node_id)}</strong>
+                <span>${escapeHtml(discoveryStageLabel(d.stage))}</span>
+              </div>
+              <p>${escapeHtml(shortText(detail, 340))}</p>
+              ${mechanism ? `<small>${escapeHtml(shortText(mechanism, 260))}</small>` : ""}
+              <div class="discoveryMeta">
+                <span>${escapeHtml(discoverySourceLabel(d))}</span>
+                <span>${escapeHtml(d.asset || "-")}</span>
+                <span>${escapeHtml(d.timeframe || "-")}</span>
+                <span>${escapeHtml(d.engine || "-")}</span>
+                <span>score ${Number(d.score || 0).toFixed(2)}</span>
+                <span>pnl ${escapeHtml(pnl)}</span>
+                <span>${trades}</span>
+                <span>${escapeHtml(age)}</span>
+              </div>
+            </article>
+          `;
+        }).join("") : discoveryEmpty}
+      </div>
+    `;
+    for (const card of document.querySelectorAll(".discoveryCard")) {
+      card.addEventListener("click", () => {
+        state.selected = card.dataset.node;
+        const n = state.data?.nodes?.find((node) => node.id === state.selected);
+        if (n) renderDetails(n);
+      });
+    }
+  }
+
+  if (!rows.length) {
+    $("rankingList").innerHTML = reset.active
+      ? `<div class="emptyRanking newOnlyEmpty"><strong>Ranking limpo</strong><span>As estrategias antigas foram ocultas. A partir de agora, so aparece aqui estrategia criada depois de ${escapeHtml(resetLabel)}, aprovada no backtest/critic e pronta para paper.</span></div>`
+      : "<div class=\"emptyRanking\">Nenhuma estrategia aprovada para teste ainda.</div>";
+    return;
+  }
+
+  $("rankingList").innerHTML = rows.map((r, index) => `
+    <article class="rankingCard ${escapeHtml(r.readiness)} ${r.deployed ? "deployed" : "notDeployed"}" data-node="${escapeHtml(r.node_id)}">
+      <div class="rankNo">#${index + 1}</div>
+      <div class="rankMain">
+        <div class="rankTitle">
+          <strong>${escapeHtml(r.name)}</strong>
+          <span>${escapeHtml(readinessLabel(r.readiness))}</span>
+          ${r.deployed
+            ? `<span class="deployBadge ok" title="Ja esta rodando no bot trader">No bot</span>`
+            : `<span class="deployBadge pending" title="${escapeHtml(r.deploy_blocker || "Aguardando deploy")}">Fora do bot</span>`}
+        </div>
+        <div class="rankMeta">
+          <span>${escapeHtml(r.campaign_label || r.campaign_id || "-")}</span>
+          <span>${escapeHtml(bucketLabel(r.source_bucket))}</span>
+          <span>${escapeHtml(r.timeframe || "-")}</span>
+          ${r.period ? `<span title="periodo testado">${escapeHtml(r.period)}</span>` : ""}
+          <span>score ${Number(r.score || 0).toFixed(2)}</span>
+          <span>sh ${Number(r.sharpe || 0).toFixed(2)}</span>
+          <span>mdd ${Number(r.mdd_pct || 0).toFixed(2)}%</span>
+          <span>${escapeHtml(r.trade_count)} trades</span>
+        </div>
+        <p>${escapeHtml(r.summary || r.node_id)}</p>
+        <small>${r.deployed
+            ? "Ativa no bot trader (active_strategies.json)."
+            : (r.deploy_blocker ? "Motivo fora do bot: " + escapeHtml(r.deploy_blocker) : "Sem bloqueios para paper.")
+        }${(r.blockers || []).length ? " / " + escapeHtml((r.blockers || []).join(", ")) : ""}${r.duplicate_count > 1 ? " / " + escapeHtml(r.duplicate_count - 1) + " duplicatas ocultas" : ""}</small>
+      </div>
+      <div class="rankPnl">
+        <span>${money(r.starting_capital)} virou</span>
+        <strong>${money(r.ending_capital)}</strong>
+        <em>${Number(r.pnl_pct || 0).toFixed(2)}%</em>
+      </div>
+    </article>
+  `).join("");
+
+  for (const card of document.querySelectorAll(".rankingCard")) {
+    card.addEventListener("click", () => {
+      state.selected = card.dataset.node;
+      const n = state.data?.nodes?.find((node) => node.id === state.selected);
+      if (n) renderDetails(n);
+    });
+  }
+}
+
 function renderCampaignOptions() {
   const select = $("rankingCampaign");
   if (!select || !state.campaigns) return;
@@ -935,10 +1391,8 @@ function renderCampaignOptions() {
   const activeId = state.campaigns.active_campaign_id || "aether_current";
   const options = [
     { id: "active", label: `Atual: ${campaigns.find(c => c.id === activeId)?.label || activeId}` },
-    { id: "legacy_pre_aether", label: "Antes / legado" },
-    { id: "all", label: "Tudo" },
     ...campaigns
-      .filter(c => !["legacy_pre_aether"].includes(c.id))
+      .filter(c => c.id === activeId)
       .map(c => ({ id: c.id, label: `${c.active ? "* " : ""}${c.label} (${c.rankable_count || 0})` })),
   ];
   const seen = new Set();
@@ -950,9 +1404,13 @@ function renderCampaignOptions() {
     })
     .map(o => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`)
     .join("");
-  if (![...select.options].some(o => o.value === state.rankingCampaign)) {
+  if (
+    ["all", "legacy_pre_aether"].includes(state.rankingCampaign) ||
+    ![...select.options].some(o => o.value === state.rankingCampaign)
+  ) {
     state.rankingCampaign = "active";
   }
+  localStorage.setItem("aetherRankingCampaign", state.rankingCampaign);
   select.value = state.rankingCampaign;
 }
 
@@ -970,24 +1428,29 @@ function renderStats() {
   $("workerCount").textContent = state.data.runtime.default_workers;
   $("runState").textContent = state.data.runtime.cycle_running ? state.data.runtime.cycle_mode : "standby";
   $("runState").className = state.data.runtime.cycle_running ? "running" : "";
-  $("statDb").textContent = "SQLite";
+  $("statDb").textContent = state.data.nodes_truncated
+    ? `SQLite ${nodes.length}/${state.data.nodes_total || nodes.length}`
+    : "SQLite";
 }
 
 async function refreshRanking() {
+  $("rankingList").innerHTML = "<div class=\"emptyRanking\">Atualizando ranking novo...</div>";
+  $("discoveryStrip").innerHTML = "";
   if (!state.campaigns) await refreshCampaigns();
   const capital = Number($("capitalInput")?.value || 1000);
-  state.ranking = await api(`/api/ranking?capital=${encodeURIComponent(capital)}&limit=120&campaign_id=${encodeURIComponent(state.rankingCampaign)}&dedupe=true&hide_blocked=false`);
+  state.ranking = await api(`/api/ranking?capital=${encodeURIComponent(capital)}&limit=250&campaign_id=${encodeURIComponent(state.rankingCampaign)}&dedupe=true&hide_blocked=false&discoveries_limit=80`);
   state.campaigns = state.ranking.campaigns;
   renderCampaignOptions();
   renderRanking();
 }
 
-// Mapa mental: grafo force-directed dos AGENTES + atividades recentes (vis-network).
-// Substitui a arvore (que ficava ilegivel com 1000+ nodes).
+// Mapa mental: mostra somente agentes e o trabalho atual deles (vis-network).
 let _agentsNetwork = null;
 let _agentsNetData = null;
 let _mindmapLoading = false;
 let _mindmapLastFetch = 0;
+let _agentsGraphLast = null;
+let _agentsGraphSelectedId = null;
 const MINDMAP_MIN_INTERVAL_MS = 6000;
 
 function _waitForVis(retries = 30) {
@@ -1008,7 +1471,7 @@ function renderMindmapFocus(res) {
   if (!focus.length) {
     panel.innerHTML = `
       <div class="graphFocusHead">
-        <span>Foco vivo</span>
+        <span>Trabalho agora</span>
         <strong>standby</strong>
       </div>
       <div class="graphFocusEmpty">Nenhum agente trabalhando agora.</div>
@@ -1018,7 +1481,7 @@ function renderMindmapFocus(res) {
 
   panel.innerHTML = `
     <div class="graphFocusHead">
-      <span>Foco vivo</span>
+      <span>Trabalho agora</span>
       <strong>${escapeHtml(focus.length)} ativo${focus.length === 1 ? "" : "s"}</strong>
     </div>
     ${focus.slice(0, 10).map((item) => `
@@ -1041,6 +1504,11 @@ function renderMindmapFocus(res) {
         _agentsNetwork.selectNodes([graphId]);
         _agentsNetwork.focus(graphId, { scale: 1.2, animation: { duration: 450, easingFunction: "easeOutCubic" } });
       }
+      if (graphId) {
+        _agentsGraphSelectedId = graphId;
+        const graphNode = _agentsNetData?.nodes?.get(graphId) || (res.nodes || []).find((node) => node.id === graphId);
+        renderAgentsGraphDetail(graphNode);
+      }
       if (rawNodeId && state.data) {
         state.selected = rawNodeId;
         const n = state.data.nodes.find((node) => node.id === rawNodeId);
@@ -1048,6 +1516,167 @@ function renderMindmapFocus(res) {
       }
     });
   }
+}
+
+function detailMetric(label, value) {
+  const clean = value === null || value === undefined || value === "" ? "-" : value;
+  return `<div class="graphDetailMetric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(clean)}</strong></div>`;
+}
+
+function shortNumber(value, digits = 2, suffix = "") {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n.toFixed(digits)}${suffix}`;
+}
+
+function probeText(probe) {
+  if (!probe) return "";
+  const params = probe.params && typeof probe.params === "object"
+    ? Object.entries(probe.params).slice(0, 5).map(([k, v]) => `${k}=${v}`).join(", ")
+    : "";
+  return [probe.symbol, probe.timeframe, params].filter(Boolean).join(" / ");
+}
+
+function renderTaskDetail(task) {
+  if (!task) return `<div class="graphDetailBlock"><div class="graphDetailText">Sem tarefa ativa para este agente.</div></div>`;
+  const metrics = task.metrics || {};
+  const probes = (task.sample_probes && task.sample_probes.length ? task.sample_probes : task.probe_specs) || [];
+  return `
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Trabalho</div>
+      <div class="graphDetailGrid">
+        ${detailMetric("status", task.status || "-")}
+        ${detailMetric("tipo", task.type || "-")}
+        ${detailMetric("timeframe", task.timeframe || "-")}
+        ${detailMetric("probes", task.probes_count || probes.length || 0)}
+        ${detailMetric("score", shortNumber(task.node_score, 3))}
+        ${detailMetric("atualizado", task.updated_at || "-")}
+      </div>
+    </div>
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Node analisado</div>
+      <div class="graphDetailText"><strong>${escapeHtml(task.node_name || task.node_id || "-")}</strong></div>
+      <div class="graphDetailText">${escapeHtml(task.node_id || "-")}</div>
+      ${task.summary ? `<div class="graphDetailText">${escapeHtml(shortText(task.summary, 180))}</div>` : ""}
+    </div>
+    ${task.hypothesis ? `
+      <div class="graphDetailBlock">
+        <div class="graphDetailLabel">Hipotese</div>
+        <div class="graphDetailText">${escapeHtml(shortText(task.hypothesis, 260))}</div>
+      </div>
+    ` : ""}
+    ${task.causal_mechanism ? `
+      <div class="graphDetailBlock">
+        <div class="graphDetailLabel">Mecanismo causal</div>
+        <div class="graphDetailText">${escapeHtml(shortText(task.causal_mechanism, 260))}</div>
+      </div>
+    ` : ""}
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Engines</div>
+      <div class="graphDetailChipRow">
+        ${(task.engines || []).length ? (task.engines || []).map((engine) => `<span class="graphDetailChip">${escapeHtml(engine)}</span>`).join("") : `<span class="graphDetailText">-</span>`}
+      </div>
+    </div>
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Metricas atuais</div>
+      <div class="graphDetailGrid">
+        ${detailMetric("PnL", shortNumber(metrics.pnl_pct, 2, "%"))}
+        ${detailMetric("Sharpe", shortNumber(metrics.sharpe, 2))}
+        ${detailMetric("Trades", metrics.trade_count ?? "-")}
+        ${detailMetric("MDD", shortNumber(metrics.mdd_pct, 2, "%"))}
+        ${detailMetric("Scouts", metrics.scout_count ?? "-")}
+        ${detailMetric("Passes", metrics.pass_count ?? "-")}
+      </div>
+    </div>
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Amostra de probes</div>
+      ${(probes || []).slice(0, 5).map((probe) => `
+        <div class="graphProbe">
+          <strong>${escapeHtml(probe.engine || "-")}</strong>
+          <small>${escapeHtml(probeText(probe) || "-")}</small>
+        </div>
+      `).join("") || `<div class="graphDetailText">Sem probes expostos ainda.</div>`}
+    </div>
+  `;
+}
+
+function renderAgentsGraphDetail(graphNode) {
+  const panel = $("agentsGraphDetail");
+  if (!panel) return;
+  const detail = graphNode?.detail;
+  if (!detail) {
+    panel.innerHTML = `
+      <div class="graphDetailHead">
+        <span>Detalhes</span>
+        <strong>Selecione um agente</strong>
+      </div>
+      <div class="graphDetailBlock">
+        <div class="graphDetailText">Clique em um agente ou em um trabalho para ver o que esta sendo analisado.</div>
+      </div>
+    `;
+    return;
+  }
+  if (detail.kind === "work") {
+    const task = detail.task || {};
+    panel.innerHTML = `
+      <div class="graphDetailHead">
+        <span>${escapeHtml(detail.agent || task.role || "Trabalho")}</span>
+        <strong>${escapeHtml(shortText(task.node_name || task.id || "Detalhe", 44))}</strong>
+      </div>
+      ${renderTaskDetail(task)}
+    `;
+    return;
+  }
+  if (detail.kind === "event") {
+    const event = detail.event || {};
+    panel.innerHTML = `
+      <div class="graphDetailHead">
+        <span>${escapeHtml(detail.agent || "Evento")}</span>
+        <strong>${escapeHtml(event.type || "ultima acao")}</strong>
+      </div>
+      <div class="graphDetailBlock">
+        ${detailMetric("hora", event.ts || "-")}
+        ${detailMetric("alvo", event.target || "-")}
+        <div class="graphDetailText">${escapeHtml(event.message || "-")}</div>
+      </div>
+    `;
+    return;
+  }
+  const tasks = detail.tasks || [];
+  const stats = detail.stats || {};
+  panel.innerHTML = `
+    <div class="graphDetailHead">
+      <span>${escapeHtml(detail.role || "Agente")}</span>
+      <strong>${escapeHtml(detail.label || "Agente")}</strong>
+    </div>
+    <div class="graphDetailBlock">
+      <div class="graphDetailGrid">
+        ${detailMetric("status", detail.status || "-")}
+        ${detailMetric("tipo", detail.agent_kind || "-")}
+        ${detailMetric("timeframe", detail.timeframe || "-")}
+        ${detailMetric("tarefas", tasks.length)}
+        ${detailMetric("fase", stats.phase || "-")}
+        ${detailMetric("task atual", detail.current_task_id || "-")}
+      </div>
+      ${stats.bubble ? `<div class="graphDetailText">${escapeHtml(stats.bubble)}</div>` : ""}
+    </div>
+    ${tasks.length ? tasks.slice(0, 3).map((task, idx) => `
+      <div class="graphDetailBlock">
+        <div class="graphDetailLabel">Tarefa ${idx + 1}</div>
+        ${renderTaskDetail(task)}
+      </div>
+    `).join("") : `
+      <div class="graphDetailBlock">
+        <div class="graphDetailText">Sem tarefa ativa agora. Ultimos eventos:</div>
+        ${(detail.recent_events || []).slice(0, 4).map((event) => `
+          <div class="graphProbe">
+            <strong>${escapeHtml(event.type || "-")}</strong>
+            <small>${escapeHtml([event.ts, shortText(event.message || "", 100)].filter(Boolean).join(" / "))}</small>
+          </div>
+        `).join("") || `<div class="graphDetailText">Nenhum evento recente.</div>`}
+      </div>
+    `}
+  `;
 }
 
 function updateAgentsGraphData(res) {
@@ -1092,16 +1721,34 @@ async function refreshMindmap(force = false) {
   }
   try {
     await _waitForVis();
-    const res = await api("/api/agents_graph?limit_per_agent=6");
+    const res = await api("/api/agents_graph?limit_per_agent=4");
+    _agentsGraphLast = res;
     const stats = $("agentsGraphStats");
     if (stats) stats.textContent = `${res.stats?.nodes || 0} nodes · ${res.stats?.edges || 0} edges`;
 
     const graphStats = res.stats || {};
-    if (stats) stats.textContent = `${graphStats.nodes || 0} nos / ${graphStats.edges || 0} ligacoes / ${graphStats.running_agents || 0} rodando / ${graphStats.active_targets || 0} alvos`;
+    if (stats) {
+      stats.textContent = [
+        `${graphStats.agents || 0} agentes`,
+        `${graphStats.running_agents || 0} rodando`,
+        `${graphStats.running_tasks || 0} tarefas`,
+        `${graphStats.queued_tasks || 0} na fila`,
+        `${graphStats.work_items || 0} itens de trabalho`,
+      ].join(" / ");
+    }
     renderMindmapFocus(res);
+    if (!_agentsGraphSelectedId && (res.focus || []).length) {
+      _agentsGraphSelectedId = res.focus[0].graph_node_id;
+    }
 
     if (_agentsNetwork && _agentsNetData) {
       updateAgentsGraphData(res);
+      if (_agentsGraphSelectedId) {
+        const selected = _agentsNetData.nodes.get(_agentsGraphSelectedId) || (res.nodes || []).find((node) => node.id === _agentsGraphSelectedId);
+        renderAgentsGraphDetail(selected);
+      } else {
+        renderAgentsGraphDetail(null);
+      }
       _mindmapLoading = false;
       return;
       // update incremental: setData re-estabiliza, evite chamar a cada refresh
@@ -1150,6 +1797,8 @@ async function refreshMindmap(force = false) {
       if (params.nodes && params.nodes.length) {
         const nid = params.nodes[0];
         const selected = _agentsNetData.nodes.get(nid);
+        _agentsGraphSelectedId = nid;
+        renderAgentsGraphDetail(selected);
         if (selected && selected.rawNodeId && state.data) {
           state.selected = selected.rawNodeId;
           const n = state.data.nodes.find((node) => node.id === selected.rawNodeId);
@@ -1159,6 +1808,11 @@ async function refreshMindmap(force = false) {
         _agentsNetData.nodes.update({ id: nid, fixed: !fixed });
       }
     });
+    if (_agentsGraphSelectedId) {
+      renderAgentsGraphDetail(_agentsNetData.nodes.get(_agentsGraphSelectedId));
+    } else {
+      renderAgentsGraphDetail(null);
+    }
   } catch (e) {
     console.error("Erro ao carregar mapa de agentes:", e);
     container.innerHTML = `<div style="padding:20px;color:#ef4444;font-family:system-ui;">Erro ao gerar mapa: ${escapeHtml(e.message)}</div>`;
@@ -1171,6 +1825,7 @@ function syncViewMode() {
   const ranking = state.viewMode === "ranking";
   const mindmap = state.viewMode === "mindmap";
   const tree = state.viewMode === "tree";
+  document.body.classList.toggle("agentOnlyView", mindmap);
 
   $("rankingView").classList.toggle("hidden", !ranking);
   $("mindmapView").classList.toggle("hidden", !mindmap);
@@ -1188,6 +1843,10 @@ function syncViewMode() {
 }
 
 async function refresh() {
+  if (state.viewMode === "ranking") {
+    await refreshRanking();
+    return;
+  }
   state.data = await api("/api/state");
   state.campaigns = state.data.campaigns;
   const activity = computeActivity(state.data);
@@ -1307,7 +1966,8 @@ $("cycleBtn").onclick = async () => {
   refresh();
 };
 $("continuousBtn").onclick = async () => {
-  await api(`/api/cycle/start?workers=${state.data?.runtime?.default_workers || 12}&limit_nodes=5&probes_per_node=60&max_tasks=5&continuous=true`, { method: "POST" });
+  const workers = Math.min(Number(state.data?.runtime?.default_workers || 12), 12);
+  await api(`/api/cycle/start?workers=${workers}&limit_nodes=24&probes_per_node=60&max_tasks=24&continuous=true`, { method: "POST" });
   refresh();
 };
 $("stopBtn").onclick = async () => {
@@ -1323,7 +1983,33 @@ $("manifestBtn").onclick = async () => {
 $("treeViewBtn").onclick = () => { state.viewMode = "tree"; window.location.hash = ""; syncViewMode(); };
 $("mindmapViewBtn").onclick = () => { state.viewMode = "mindmap"; window.location.hash = "mindmap"; syncViewMode(); };
 $("rankingViewBtn").onclick = () => { state.viewMode = "ranking"; window.location.hash = "ranking"; syncViewMode(); };
+for (const btn of document.querySelectorAll("[data-ranking-tab]")) {
+  btn.addEventListener("click", () => setRankingTab(btn.dataset.rankingTab));
+}
 $("refreshRankingBtn").onclick = () => refreshRanking();
+$("resetRankingBtn").onclick = async () => {
+  const btn = $("resetRankingBtn");
+  const status = $("deployRankingStatus");
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Zerando...";
+  status.textContent = "";
+  try {
+    const capital = Number($("capitalInput")?.value || 1000);
+    const res = await api(
+      `/api/ranking/reset?capital=${encodeURIComponent(capital)}&campaign_id=${encodeURIComponent(state.rankingCampaign)}&dedupe=true`,
+      { method: "POST" }
+    );
+    status.textContent = `${res.hidden_count || 0} antigas ocultas`;
+    await refreshRanking();
+  } catch (e) {
+    status.textContent = "Falha no reset";
+    alert(`Falha ao zerar ranking:\n${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+};
 $("deployRankingBtn").onclick = async () => {
   const btn = $("deployRankingBtn");
   const status = $("deployRankingStatus");
@@ -1332,13 +2018,13 @@ $("deployRankingBtn").onclick = async () => {
     status.textContent = "nenhuma estrategia pronta";
     return;
   }
-  if (!confirm(`Ativar ate ${Math.min(ready, 8)} estrategias prontas no bot paper?`)) return;
+  if (!confirm(`Ativar ate ${Math.min(ready, 50)} estrategias prontas no bot paper?`)) return;
   btn.disabled = true;
   status.textContent = "ativando...";
   try {
     const capital = Number($("capitalInput")?.value || 1000);
     const res = await api(
-      `/api/ranking/deploy?capital=${encodeURIComponent(capital)}&limit=120&campaign_id=${encodeURIComponent(state.rankingCampaign)}&max_deploy=8`,
+      `/api/ranking/deploy?capital=${encodeURIComponent(capital)}&limit=250&campaign_id=${encodeURIComponent(state.rankingCampaign)}&max_deploy=50`,
       { method: "POST" }
     );
     status.textContent = `${res.deployed_count || 0} ativas no bot`;
@@ -1371,4 +2057,4 @@ $("newCampaignBtn").onclick = async () => {
 setupNavigation();
 syncViewMode();
 refresh();
-setInterval(refresh, 2500);
+setInterval(refresh, 6000);

@@ -1,1609 +1,81 @@
 {
   "version": 1,
-  "updated_at": "2026-05-09T16:13:11Z",
+  "updated_at": "2026-05-19T04:06:23Z",
   "strategies": [
     {
-      "id": "manual-hybrid-breakout-eth-4h",
-      "engine": "hybrid_breakout",
-      "params": {
-        "adx_len": 14,
-        "adx_smooth": 14,
-        "adx_thr": 20.0,
-        "ema_len": 200,
-        "breakout_len": 20,
-        "atr_len": 14,
-        "atr_mult_trail": 2.0,
-        "atr_mult_stop": 1.5,
-        "vol_sma_len": 20,
-        "vol_mult": 1.3
-      },
-      "asset": "ETHUSDT",
-      "timeframe": "4h",
-      "score": 0.95,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Hybrid Breakout V3 (TradingView adapt)",
-        "pnl_pct": 86.15,
-        "sharpe": 1.28,
-        "mdd_pct": 21.91,
-        "trade_count": 37,
-        "hit_rate": 0.368,
-        "validation_passed": true,
-        "validation_stage": "critic_v4_full",
-        "validated_at": "2026-05-09T00:30:00Z",
-        "validated_by": "manual_critic_v4",
-        "critic_status": "approved",
-        "critic_reason": "WF 3/4 PASS, cross-symbol BTC PASS, perturb 100% positivos PASS, bootstrap P5+0.24 PASS",
-        "combo_count": 1
-      },
-      "source_node_id": "manual:hybrid_breakout:eth-4h",
-      "source": "aether_manual_v3"
-    },
-    {
-      "id": "manual-hull-suite-btc-1d",
-      "engine": "hull_suite",
-      "params": {
-        "length": 55,
-        "mode": "Hma"
-      },
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.92,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Hull Suite Strategy (DashTrader/InSilico) -- BTC 1d",
-        "pnl_pct": 154.02,
-        "sharpe": 1.13,
-        "mdd_pct": 33.92,
-        "trade_count": 24,
-        "hit_rate": 0.391,
-        "validation_passed": true,
-        "validation_stage": "critic_v4_full",
-        "validated_at": "2026-05-09T00:50:00Z",
-        "validated_by": "manual_critic_v4",
-        "critic_status": "approved",
-        "critic_reason": "WF 3/3 PASS, cross-symbol 3/3 alts positivos, perturb length 100% positivos, bootstrap P5+0.38",
-        "combo_count": 1
-      },
-      "source_node_id": "manual:hull_suite:btc-1d",
-      "source": "aether_manual_hull"
-    },
-    {
-      "id": "manual-rsi-div-btc-4h",
-      "engine": "rsi_divergence",
-      "params": {
-        "rsi_len": 9,
-        "lbL": 1,
-        "lbR": 3,
-        "take_profit_rsi": 80,
-        "range_lower": 5,
-        "range_upper": 60
-      },
-      "asset": "BTCUSDT",
-      "timeframe": "4h",
-      "score": 0.78,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "RSI Divergence (TV) -- BTCUSDT 4h",
-        "pnl_pct": 59.9,
-        "sharpe": 0.93,
-        "mdd_pct": 26.82,
-        "trade_count": 23,
-        "hit_rate": 0.652,
-        "validation_passed": true,
-        "validation_stage": "critic_v4_full",
-        "validated_at": "2026-05-09T01:00:00Z",
-        "validated_by": "manual_critic_v4",
-        "critic_status": "approved",
-        "critic_reason": "WF 4/4 PASS, CS 3/3 alts pos, perturb 100% pos, BS P5 -0.145",
-        "combo_count": 1
-      },
-      "source_node_id": "manual:rsi_divergence:btc-4h",
-      "source": "aether_manual_rsi_div"
-    },
-    {
-      "id": "manual-rsi-div-sol-4h",
-      "engine": "rsi_divergence",
-      "params": {
-        "rsi_len": 9,
-        "lbL": 1,
-        "lbR": 3,
-        "take_profit_rsi": 80,
-        "range_lower": 5,
-        "range_upper": 60
-      },
-      "asset": "SOLUSDT",
-      "timeframe": "4h",
-      "score": 0.92,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "RSI Divergence (TV) -- SOLUSDT 4h",
-        "pnl_pct": 189.04,
-        "sharpe": 1.39,
-        "mdd_pct": 37.91,
-        "trade_count": 23,
-        "hit_rate": 0.783,
-        "validation_passed": true,
-        "validation_stage": "critic_v4_full",
-        "validated_at": "2026-05-09T01:00:00Z",
-        "validated_by": "manual_critic_v4",
-        "critic_status": "approved",
-        "critic_reason": "WF 4/4 PASS (todos folds positivos!), CS 3/3, perturb 100% pos, BS P5 +0.759",
-        "combo_count": 1
-      },
-      "source_node_id": "manual:rsi_divergence:sol-4h",
-      "source": "aether_manual_rsi_div"
-    },
-    {
-      "id": "manual-rsi-div-bnb-1d",
-      "engine": "rsi_divergence",
-      "params": {
-        "rsi_len": 9,
-        "lbL": 1,
-        "lbR": 3,
-        "take_profit_rsi": 80,
-        "range_lower": 5,
-        "range_upper": 60
-      },
-      "asset": "BNBUSDT",
-      "timeframe": "1d",
-      "score": 0.78,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "RSI Divergence (TV) -- BNBUSDT 1d",
-        "pnl_pct": 48.4,
-        "sharpe": 0.94,
-        "mdd_pct": 14.15,
-        "trade_count": 4,
-        "hit_rate": 0.667,
-        "validation_passed": true,
-        "validation_stage": "critic_v4_full",
-        "validated_at": "2026-05-09T01:00:00Z",
-        "validated_by": "manual_critic_v4",
-        "critic_status": "approved",
-        "critic_reason": "WF 4/4 PASS, CS 2/3 (BTC -0.5, ETH -20.4, SOL +29.7), perturb 100% pos, BS P5 +0.126",
-        "combo_count": 1
-      },
-      "source_node_id": "manual:rsi_divergence:bnb-1d",
-      "source": "aether_manual_rsi_div"
-    },
-    {
-      "id": "manual-sniper-bnb-1d",
-      "engine": "sniper_csbender",
-      "params": {
-        "period_minutes": 720,
-        "timeframe": "1d"
-      },
-      "asset": "BNBUSDT",
-      "timeframe": "1d",
-      "score": 0.78,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Sniper CSBender_ -- BNB 1d cruzamento open/close 12h",
-        "pnl_pct": 58.37,
-        "sharpe": 0.6,
-        "mdd_pct": 32.65,
-        "trade_count": 274,
-        "hit_rate": 0.37,
-        "validation_passed": true,
-        "validation_stage": "critic_v4_full",
-        "validated_at": "2026-05-09T01:30:00Z",
-        "validated_by": "manual_critic_v4",
-        "critic_status": "approved",
-        "critic_reason": "WF 3/4 PASS [-16,+43,+11,+7], CS 1/3 alts (SOL +24.82%), perturb 100% pos (limit TF1d), BS P5 +0.358",
-        "combo_count": 1
-      },
-      "source_node_id": "manual:sniper_csbender:bnb-1d",
-      "source": "aether_manual_sniper"
-    },
-    {
-      "id": "aether-137ea29514bffe",
+      "id": "aether-04da0fe2e62980",
       "engine": "combo",
       "params": {
         "mode": "consensus",
         "specs": [
           {
-            "engine": "atr_breakout",
+            "engine": "golden_cross",
             "params": {
-              "atr_mult": 1.725,
-              "atr_period": 12,
-              "long_only": false
+              "distance_min": 0.005,
+              "long_only": true,
+              "long_window": 200,
+              "short_window": 50,
+              "slope_min": 0.0001,
+              "slope_window": 20
             }
           },
-          {
-            "engine": "vwap_dev",
-            "params": {
-              "long_only": false,
-              "window": 26,
-              "z_threshold": 0.85
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "atr_breakout",
-          "params": {
-            "atr_mult": 1.725,
-            "atr_period": 12,
-            "long_only": false
-          }
-        },
-        {
-          "engine": "vwap_dev",
-          "params": {
-            "long_only": false,
-            "window": 26,
-            "z_threshold": 0.85
-          }
-        }
-      ],
-      "asset": "ETHUSDT",
-      "timeframe": "1d",
-      "score": 0.5148,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de ATR breakout com VWAP confirmando fluxo / 1d",
-        "pnl_pct": 56.996,
-        "sharpe": 0.863,
-        "mdd_pct": 15.0307,
-        "trade_count": 40,
-        "hit_rate": 0.75,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:27:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=52.10% wf=5/6 regime=2/4",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:atr-breakout-vwap-flow-:fbc1c59a06",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-cb485ab586a187",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 100,
-              "method": "trend_align",
-              "slope_window": 30,
-              "vol_percentile_max": 70,
-              "vol_window": 20
-            }
-          },
-          {
-            "engine": "vwap_dev",
-            "params": {
-              "long_only": false,
-              "window": 50,
-              "z_threshold": 0.5
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 100,
-            "method": "trend_align",
-            "slope_window": 30,
-            "vol_percentile_max": 70,
-            "vol_window": 20
-          }
-        },
-        {
-          "engine": "vwap_dev",
-          "params": {
-            "long_only": false,
-            "window": 50,
-            "z_threshold": 0.5
-          }
-        }
-      ],
-      "asset": "XRPUSDT",
-      "timeframe": "1d",
-      "score": 0.5134,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Regime trend-align com VWAP pullback timing / 1h / 1d",
-        "pnl_pct": 39.553,
-        "sharpe": 0.9323,
-        "mdd_pct": 14.5051,
-        "trade_count": 31,
-        "hit_rate": 0.6452,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T23:06:05Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=39.55% wf=8/8 regime=2/4",
-        "combo_count": 6
-      },
-      "source_node_id": "llmhyp:regime-trend-align-com-vwap-dev-pullback-1h:tf:1d",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-1bbab8f7961868",
-      "engine": "bollinger",
-      "params": {
-        "long_only": true,
-        "num_std": 1.36,
-        "window": 8
-      },
-      "probe_specs": [
-        {
-          "engine": "bollinger",
-          "params": {
-            "long_only": true,
-            "num_std": 1.36,
-            "window": 8
-          }
-        }
-      ],
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.5131,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de Bollinger squeeze sob regime de MA lenta / bollinger window=",
-        "pnl_pct": 42.4777,
-        "sharpe": 0.6553,
-        "mdd_pct": 20.4213,
-        "trade_count": 79,
-        "hit_rate": 0.6456,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:17:44Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=46.00% wf=5/6 regime=2/4 grid_pos=1.00 sharpe_p5=-0.07 pos_frac=0.93",
-        "combo_count": 0
-      },
-      "source_node_id": "mut:llmhyp:bb-squeeze-ma-regime-lo:c3df45a4d7",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-0d49a7c841ae23",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "atr_breakout",
-            "params": {
-              "atr_mult": 1.275,
-              "atr_period": 16,
-              "long_only": false
-            }
-          },
-          {
-            "engine": "zscore",
-            "params": {
-              "long_only": false,
-              "threshold": 0.85,
-              "window": 23
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "atr_breakout",
-          "params": {
-            "atr_mult": 1.275,
-            "atr_period": 16,
-            "long_only": false
-          }
-        },
-        {
-          "engine": "zscore",
-          "params": {
-            "long_only": false,
-            "threshold": 0.85,
-            "window": 23
-          }
-        }
-      ],
-      "asset": "XRPUSDT",
-      "timeframe": "1d",
-      "score": 0.5113,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de ATR breakout com z-score baixo favoravel / 1d",
-        "pnl_pct": 232.1163,
-        "sharpe": 1.0153,
-        "mdd_pct": 21.7619,
-        "trade_count": 53,
-        "hit_rate": 0.8077,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:20:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=191.61% wf=6/6 regime=3/4",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:atr-breakout-zscore-bai:4572b20d0d",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-58d9d43357f7cd",
-      "engine": "bollinger",
-      "params": {
-        "long_only": true,
-        "num_std": 1.84,
-        "window": 12
-      },
-      "probe_specs": [
-        {
-          "engine": "bollinger",
-          "params": {
-            "long_only": true,
-            "num_std": 1.84,
-            "window": 12
-          }
-        }
-      ],
-      "asset": "LINKUSDT",
-      "timeframe": "1d",
-      "score": 0.5099,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de Bollinger squeeze sob regime de MA lenta / bollinger window=",
-        "pnl_pct": 99.3545,
-        "sharpe": 1.0319,
-        "mdd_pct": 20.6455,
-        "trade_count": 46,
-        "hit_rate": 0.7174,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T15:16:16Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=64.81% wf=5/6 regime=3/4 grid_pos=0.75 sharpe_p5=0.30 pos_frac=0.99",
-        "combo_count": 0
-      },
-      "source_node_id": "mut:llmhyp:bb-squeeze-ma-regime-lo:c1eb3146c6",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-c697291de1453a",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "rsi",
-            "params": {
-              "long_only": false,
-              "overbought": 60,
-              "oversold": 26,
-              "period": 12
-            }
-          },
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 115,
-              "method": "low_vol_breakout",
-              "slope_window": 23,
-              "vol_percentile_max": 30,
-              "vol_window": 26
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "rsi",
-          "params": {
-            "long_only": false,
-            "overbought": 60,
-            "oversold": 26,
-            "period": 12
-          }
-        },
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 115,
-            "method": "low_vol_breakout",
-            "slope_window": 23,
-            "vol_percentile_max": 30,
-            "vol_window": 26
-          }
-        }
-      ],
-      "asset": "SOLUSDT",
-      "timeframe": "4h",
-      "score": 0.5082,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de RSI saindo de extremo em regime low-vol breakout / 4h",
-        "pnl_pct": 99.9976,
-        "sharpe": 1.0617,
-        "mdd_pct": 26.5346,
-        "trade_count": 67,
-        "hit_rate": 0.3433,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T15:16:16Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=61.52% wf=5/6 regime=3/5",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:rsi-extreme-regime-low-:0cdc155a38",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-33bff6316f87c1",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "atr_breakout",
-            "params": {
-              "atr_mult": 1.725,
-              "atr_period": 12,
-              "long_only": false
-            }
-          },
-          {
-            "engine": "vwap_dev",
-            "params": {
-              "long_only": false,
-              "window": 26,
-              "z_threshold": 1.15
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "atr_breakout",
-          "params": {
-            "atr_mult": 1.725,
-            "atr_period": 12,
-            "long_only": false
-          }
-        },
-        {
-          "engine": "vwap_dev",
-          "params": {
-            "long_only": false,
-            "window": 26,
-            "z_threshold": 1.15
-          }
-        }
-      ],
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.4948,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de ATR breakout com VWAP confirmando fluxo / 1d",
-        "pnl_pct": 44.4305,
-        "sharpe": 0.7816,
-        "mdd_pct": 15.3902,
-        "trade_count": 35,
-        "hit_rate": 0.7353,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:27:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=43.99% wf=6/6 regime=3/4",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:atr-breakout-vwap-flow-:b2d87700de",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-80a14d8b748ae8",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
           {
             "engine": "adx",
             "params": {
-              "long_only": false,
+              "long_only": true,
               "period": 14,
               "threshold": 25
             }
-          },
-          {
-            "engine": "stochastic",
-            "params": {
-              "long_only": false,
-              "overbought": 80,
-              "oversold": 20,
-              "period": 14,
-              "smooth_d": 3,
-              "smooth_k": 3
-            }
           }
         ]
       },
       "probe_specs": [
+        {
+          "engine": "golden_cross",
+          "params": {
+            "distance_min": 0.005,
+            "long_only": true,
+            "long_window": 200,
+            "short_window": 50,
+            "slope_min": 0.0001,
+            "slope_window": 20
+          }
+        },
         {
           "engine": "adx",
           "params": {
-            "long_only": false,
+            "long_only": true,
             "period": 14,
             "threshold": 25
           }
-        },
-        {
-          "engine": "stochastic",
-          "params": {
-            "long_only": false,
-            "overbought": 80,
-            "oversold": 20,
-            "period": 14,
-            "smooth_d": 3,
-            "smooth_k": 3
-          }
-        }
-      ],
-      "asset": "ADAUSDT",
-      "timeframe": "4h",
-      "score": 0.4935,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "ADX forte com Stochastic pullback timing / 4h / 4h",
-        "pnl_pct": 42.7682,
-        "sharpe": 0.7422,
-        "mdd_pct": 21.2417,
-        "trade_count": 62,
-        "hit_rate": 0.371,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T18:55:19Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=14.45% wf=5/6 regime=4/5",
-        "combo_count": 6
-      },
-      "source_node_id": "llmhyp:adx-forte-com-stochastic-pullback:tf:4h",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-864516cccaf220",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "atr_breakout",
-            "params": {
-              "atr_mult": 1.275,
-              "atr_period": 12,
-              "long_only": false
-            }
-          },
-          {
-            "engine": "zscore",
-            "params": {
-              "long_only": false,
-              "threshold": 1.15,
-              "window": 17
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "atr_breakout",
-          "params": {
-            "atr_mult": 1.275,
-            "atr_period": 12,
-            "long_only": false
-          }
-        },
-        {
-          "engine": "zscore",
-          "params": {
-            "long_only": false,
-            "threshold": 1.15,
-            "window": 17
-          }
-        }
-      ],
-      "asset": "LINKUSDT",
-      "timeframe": "1d",
-      "score": 0.4934,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de ATR breakout com z-score baixo favoravel / 1d",
-        "pnl_pct": 54.7716,
-        "sharpe": 0.7146,
-        "mdd_pct": 16.1707,
-        "trade_count": 43,
-        "hit_rate": 0.814,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T13:38:05Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=11.99% wf=5/6 regime=2/4",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:atr-breakout-zscore-bai:5b4e0c8557",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-b59685de9eca41",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "vol_compression",
-            "params": {
-              "atr_window": 12,
-              "breakout_window": 23,
-              "long_only": false,
-              "percentile_max": 26,
-              "percentile_window": 138
-            }
-          },
-          {
-            "engine": "rsi",
-            "params": {
-              "long_only": false,
-              "overbought": 60,
-              "oversold": 26,
-              "period": 16
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "vol_compression",
-          "params": {
-            "atr_window": 12,
-            "breakout_window": 23,
-            "long_only": false,
-            "percentile_max": 26,
-            "percentile_window": 138
-          }
-        },
-        {
-          "engine": "rsi",
-          "params": {
-            "long_only": false,
-            "overbought": 60,
-            "oversold": 26,
-            "period": 16
-          }
-        }
-      ],
-      "asset": "LINKUSDT",
-      "timeframe": "4h",
-      "score": 0.4881,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de Compressao de vol confirmada por RSI saindo de extremo / 4h",
-        "pnl_pct": 71.1041,
-        "sharpe": 0.8606,
-        "mdd_pct": 31.1749,
-        "trade_count": 90,
-        "hit_rate": 0.3556,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:17:44Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=71.10% wf=4/6 regime=4/5",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:vol-compression-rsi-ext:264b76b2e3",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-bbb2f1883f2ca5",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "ma_crossover",
-            "params": {
-              "long_only": false,
-              "long_window": 115,
-              "short_window": 1
-            }
-          },
-          {
-            "engine": "rsi",
-            "params": {
-              "long_only": false,
-              "overbought": 58,
-              "oversold": 52,
-              "period": 12
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "ma_crossover",
-          "params": {
-            "long_only": false,
-            "long_window": 115,
-            "short_window": 1
-          }
-        },
-        {
-          "engine": "rsi",
-          "params": {
-            "long_only": false,
-            "overbought": 58,
-            "oversold": 52,
-            "period": 12
-          }
-        }
-      ],
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.4867,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de MA trend + RSI pullback entry / 1d",
-        "pnl_pct": 56.7506,
-        "sharpe": 0.779,
-        "mdd_pct": 18.5371,
-        "trade_count": 43,
-        "hit_rate": 0.5581,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:25:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=43.02% wf=4/6 regime=2/4",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:ma-rsi-trend-pullback-e:89d3e6b3f7",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-bf84c80e32898b",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "ma_crossover",
-            "params": {
-              "long_only": false,
-              "long_window": 17,
-              "short_window": 4
-            }
-          },
-          {
-            "engine": "supertrend",
-            "params": {
-              "atr_mult": 4.6,
-              "atr_period": 24,
-              "long_only": false
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "ma_crossover",
-          "params": {
-            "long_only": false,
-            "long_window": 17,
-            "short_window": 4
-          }
-        },
-        {
-          "engine": "supertrend",
-          "params": {
-            "atr_mult": 4.6,
-            "atr_period": 24,
-            "long_only": false
-          }
-        }
-      ],
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.4791,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de MA cross rapido com Supertrend lento como hard stop / 1d",
-        "pnl_pct": 153.2153,
-        "sharpe": 1.1376,
-        "mdd_pct": 25.7789,
-        "trade_count": 38,
-        "hit_rate": 0.2973,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:28:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=153.96% wf=5/6 regime=3/4",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:ma-fast-slow-trend-supe:0b1be093e1",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-f68b89eb078880",
-      "engine": "bollinger",
-      "params": {
-        "long_only": true,
-        "num_std": 1.84,
-        "window": 20
-      },
-      "probe_specs": [
-        {
-          "engine": "bollinger",
-          "params": {
-            "long_only": true,
-            "num_std": 1.84,
-            "window": 20
-          }
-        }
-      ],
-      "asset": "LINKUSDT",
-      "timeframe": "1d",
-      "score": 0.479,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de Bollinger squeeze sob regime de MA lenta / bollinger window=20 (M2)",
-        "pnl_pct": 90.6003,
-        "sharpe": 0.9338,
-        "mdd_pct": 20.7291,
-        "trade_count": 34,
-        "hit_rate": 0.7647,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:17:44Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=74.12% wf=5/6 regime=3/4 grid_pos=0.98 sharpe_p5=0.29 pos_frac=0.99",
-        "combo_count": 0
-      },
-      "source_node_id": "mut:llmhyp:bb-squeeze-ma-regime-lo:c1eb3146c6:mut:window-20-a78010",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-568c1e1cd5d39d",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "rsi",
-            "params": {
-              "long_only": false,
-              "overbought": 60,
-              "oversold": 34,
-              "period": 16
-            }
-          },
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 115,
-              "method": "low_vol_breakout",
-              "slope_window": 17,
-              "vol_percentile_max": 40,
-              "vol_window": 26
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "rsi",
-          "params": {
-            "long_only": false,
-            "overbought": 60,
-            "oversold": 34,
-            "period": 16
-          }
-        },
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 115,
-            "method": "low_vol_breakout",
-            "slope_window": 17,
-            "vol_percentile_max": 40,
-            "vol_window": 26
-          }
         }
       ],
       "asset": "XRPUSDT",
-      "timeframe": "4h",
-      "score": 0.4776,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de RSI saindo de extremo em regime low-vol breakout / 4h",
-        "pnl_pct": 21.8795,
-        "sharpe": 0.5304,
-        "mdd_pct": 20.1832,
-        "trade_count": 79,
-        "hit_rate": 0.3333,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:25:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=1.86% wf=4/6 regime=4/5",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:rsi-extreme-regime-low-:e349ec8048",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-233c87692890a1",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "rsi",
-            "params": {
-              "long_only": false,
-              "overbought": 60,
-              "oversold": 34,
-              "period": 16
-            }
-          },
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 115,
-              "method": "low_vol_breakout",
-              "slope_window": 17,
-              "vol_percentile_max": 30,
-              "vol_window": 26
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "rsi",
-          "params": {
-            "long_only": false,
-            "overbought": 60,
-            "oversold": 34,
-            "period": 16
-          }
-        },
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 115,
-            "method": "low_vol_breakout",
-            "slope_window": 17,
-            "vol_percentile_max": 30,
-            "vol_window": 26
-          }
-        }
-      ],
-      "asset": "XRPUSDT",
-      "timeframe": "4h",
-      "score": 0.4771,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de RSI saindo de extremo em regime low-vol breakout / 4h",
-        "pnl_pct": 21.8273,
-        "sharpe": 0.5295,
-        "mdd_pct": 20.1832,
-        "trade_count": 79,
-        "hit_rate": 0.3333,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:24:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=1.86% wf=4/6 regime=4/5",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:rsi-extreme-regime-low-:a1c06b2f35",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-f975281a94643a",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "rsi",
-            "params": {
-              "long_only": false,
-              "overbought": 60,
-              "oversold": 34,
-              "period": 16
-            }
-          },
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 115,
-              "method": "low_vol_breakout",
-              "slope_window": 23,
-              "vol_percentile_max": 40,
-              "vol_window": 34
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "rsi",
-          "params": {
-            "long_only": false,
-            "overbought": 60,
-            "oversold": 34,
-            "period": 16
-          }
-        },
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 115,
-            "method": "low_vol_breakout",
-            "slope_window": 23,
-            "vol_percentile_max": 40,
-            "vol_window": 34
-          }
-        }
-      ],
-      "asset": "ETHUSDT",
-      "timeframe": "4h",
-      "score": 0.4765,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de RSI saindo de extremo em regime low-vol breakout / 4h",
-        "pnl_pct": 34.6274,
-        "sharpe": 0.7102,
-        "mdd_pct": 25.6859,
-        "trade_count": 72,
-        "hit_rate": 0.338,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:25:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=40.64% wf=4/6 regime=3/5",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:rsi-extreme-regime-low-:64f0cf194d",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-d36b165fdc8599",
-      "engine": "donchian",
-      "params": {
-        "entry_window": 20,
-        "exit_window": 10,
-        "long_only": false
-      },
-      "probe_specs": [
-        {
-          "engine": "donchian",
-          "params": {
-            "entry_window": 20,
-            "exit_window": 10,
-            "long_only": false
-          }
-        }
-      ],
-      "asset": "LINKUSDT",
       "timeframe": "1h",
-      "score": 0.4736,
+      "score": 0.6506,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Donchian breakout puro / 1h",
-        "pnl_pct": 363.3376,
-        "sharpe": 1.4825,
-        "mdd_pct": 33.8302,
-        "trade_count": 39,
-        "hit_rate": 0.4474,
+        "name": "Golden Cross + ADX Trend Strength 1d / 1h",
+        "pnl_pct": 222.0445,
+        "sharpe": 1.7108,
+        "mdd_pct": 28.1758,
+        "trade_count": 114,
+        "hit_rate": 0.3509,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-09T16:03:03Z",
+        "validated_at": "2026-05-13T08:53:50Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/4 perturb_med=334.80% wf=7/8 regime=3/5 grid_pos=1.00 sharpe_p5=0.37 pos_frac=0.99",
-        "combo_count": 0
+        "critic_reason": "approved cross_pass=1/3 perturb_med=220.96% wf=4/6 regime=5/5",
+        "combo_count": 9
       },
-      "source_node_id": "llmhyp:donchian-breakout-pure-4h:tf:1h",
+      "source_node_id": "llmhyp:golden-cross-adx-strength-confirm-1d:tf:1h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T16:11:11Z"
-    },
-    {
-      "id": "aether-e55936b6fe1b2d",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "atr_breakout",
-            "params": {
-              "atr_mult": 2.0,
-              "atr_period": 14,
-              "long_only": false
-            }
-          },
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 100,
-              "method": "low_vol_breakout",
-              "slope_window": 20,
-              "vol_percentile_max": 35,
-              "vol_window": 30
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "atr_breakout",
-          "params": {
-            "atr_mult": 2.0,
-            "atr_period": 14,
-            "long_only": false
-          }
-        },
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 100,
-            "method": "low_vol_breakout",
-            "slope_window": 20,
-            "vol_percentile_max": 35,
-            "vol_window": 30
-          }
-        }
-      ],
-      "asset": "SOLUSDT",
-      "timeframe": "4h",
-      "score": 0.4731,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "ATR breakout em regime low-vol / 4h",
-        "pnl_pct": 127.0865,
-        "sharpe": 0.99,
-        "mdd_pct": 30.9144,
-        "trade_count": 68,
-        "hit_rate": 0.3582,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T00:39:45Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=81.12% wf=6/8 regime=3/5",
-        "combo_count": 6
-      },
-      "source_node_id": "llmhyp:atr-breakout-regime-low-vol:tf:4h",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-30835195441e26",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "atr_breakout",
-            "params": {
-              "atr_mult": 1.275,
-              "atr_period": 16,
-              "long_only": false
-            }
-          },
-          {
-            "engine": "zscore",
-            "params": {
-              "long_only": false,
-              "threshold": 0.85,
-              "window": 17
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "atr_breakout",
-          "params": {
-            "atr_mult": 1.275,
-            "atr_period": 16,
-            "long_only": false
-          }
-        },
-        {
-          "engine": "zscore",
-          "params": {
-            "long_only": false,
-            "threshold": 0.85,
-            "window": 17
-          }
-        }
-      ],
-      "asset": "XRPUSDT",
-      "timeframe": "1d",
-      "score": 0.4558,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de ATR breakout com z-score baixo favoravel / 1d",
-        "pnl_pct": 73.4914,
-        "sharpe": 0.8931,
-        "mdd_pct": 31.7046,
-        "trade_count": 68,
-        "hit_rate": 0.7059,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:24:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=70.35% wf=5/6 regime=3/4",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:atr-breakout-zscore-bai:f91c91e2ad",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "aether-13fb94c75d455c",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "rsi",
-            "params": {
-              "long_only": false,
-              "overbought": 60,
-              "oversold": 34,
-              "period": 12
-            }
-          },
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 115,
-              "method": "low_vol_breakout",
-              "slope_window": 17,
-              "vol_percentile_max": 40,
-              "vol_window": 26
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "rsi",
-          "params": {
-            "long_only": false,
-            "overbought": 60,
-            "oversold": 34,
-            "period": 12
-          }
-        },
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 115,
-            "method": "low_vol_breakout",
-            "slope_window": 17,
-            "vol_percentile_max": 40,
-            "vol_window": 26
-          }
-        }
-      ],
-      "asset": "SOLUSDT",
-      "timeframe": "4h",
-      "score": 0.4506,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de RSI saindo de extremo em regime low-vol breakout / 4h",
-        "pnl_pct": 25.9139,
-        "sharpe": 0.506,
-        "mdd_pct": 27.5991,
-        "trade_count": 80,
-        "hit_rate": 0.3,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:25:17Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=5.24% wf=4/6 regime=3/5",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:rsi-extreme-regime-low-:222c8e1ddd",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
-    },
-    {
-      "id": "manual-sma-cross-btc-1d",
-      "engine": "sma_cross_exits",
-      "params": {
-        "short_len": 14,
-        "long_len": 28,
-        "take_profit_pct": 4.0,
-        "stop_loss_pct": 2.0
-      },
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.8,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "SMA Crossover 14/28 com TP+4%/SL-2% (adolgov) -- BTC 1d",
-        "pnl_pct": 26.28,
-        "sharpe": 0.82,
-        "mdd_pct": 8.13,
-        "trade_count": 21,
-        "hit_rate": 0.524,
-        "validation_passed": true,
-        "validation_stage": "critic_v4_full",
-        "validated_at": "2026-05-09T15:00:00Z",
-        "validated_by": "manual_critic_v4",
-        "critic_status": "approved",
-        "critic_reason": "WF 3/3 [-3.86,+9.54,+16.62,-1.82], CS SOL +16.80% (1/3), perturb median +3.28% pos 80%, BS P5 +0.227. MDD 8.13% (menor de todas TV manuais)",
-        "combo_count": 1
-      },
-      "source_node_id": "manual:sma_cross_exits:btc-1d",
-      "source": "aether_manual_sma"
+      "deployed_at": "2026-05-18T18:19:29Z"
     },
     {
       "id": "aether-723145b7a7993b",
@@ -1678,7 +150,7 @@
       },
       "source_node_id": "mut:llmhyp:zscore-mean-revert-em-l:41d26ffca1",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:09Z"
+      "deployed_at": "2026-05-18T18:19:29Z"
     },
     {
       "id": "aether-e6a8b5e84a15bb",
@@ -1753,231 +225,10 @@
       },
       "source_node_id": "mut:llmhyp:zscore-mean-revert-em-l:acf57997f3",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:09Z"
+      "deployed_at": "2026-05-18T18:19:29Z"
     },
     {
-      "id": "aether-5fc5a278dcbb54",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 100,
-              "method": "high_vol_fade",
-              "slope_window": 30,
-              "vol_percentile_max": 90,
-              "vol_window": 20
-            }
-          },
-          {
-            "engine": "zscore",
-            "params": {
-              "long_only": false,
-              "threshold": 2.0,
-              "window": 30
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 100,
-            "method": "high_vol_fade",
-            "slope_window": 30,
-            "vol_percentile_max": 90,
-            "vol_window": 20
-          }
-        },
-        {
-          "engine": "zscore",
-          "params": {
-            "long_only": false,
-            "threshold": 2.0,
-            "window": 30
-          }
-        }
-      ],
-      "asset": "XRPUSDT",
-      "timeframe": "15m",
-      "score": 0.6879,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Regime high-vol fade com z-score extremo / 4h / 15m",
-        "pnl_pct": 15.9557,
-        "sharpe": 2.0444,
-        "mdd_pct": 5.8166,
-        "trade_count": 58,
-        "hit_rate": 0.6207,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-09T12:56:09Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=15.96% wf=7/8 regime=2/3",
-        "combo_count": 6
-      },
-      "source_node_id": "llmhyp:regime-high-vol-fade-com-zscore-extremo-4h:tf:15m",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T12:57:27Z"
-    },
-    {
-      "id": "aether-e259ab280d412a",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "zscore",
-            "params": {
-              "long_only": false,
-              "threshold": 2.0,
-              "window": 30
-            }
-          },
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 100,
-              "method": "high_vol_fade",
-              "slope_window": 30,
-              "vol_percentile_max": 40,
-              "vol_window": 20
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "zscore",
-          "params": {
-            "long_only": false,
-            "threshold": 2.0,
-            "window": 30
-          }
-        },
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 100,
-            "method": "high_vol_fade",
-            "slope_window": 30,
-            "vol_percentile_max": 40,
-            "vol_window": 20
-          }
-        }
-      ],
-      "asset": "XRPUSDT",
-      "timeframe": "15m",
-      "score": 0.6735,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Zscore mean-revert em regime low-vol / 1h / 15m",
-        "pnl_pct": 15.185,
-        "sharpe": 1.9487,
-        "mdd_pct": 5.8166,
-        "trade_count": 60,
-        "hit_rate": 0.6167,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T03:26:27Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=12.86% wf=7/8 regime=2/3",
-        "combo_count": 6
-      },
-      "source_node_id": "llmhyp:zscore-mean-revert-em-low-vol-fade:tf:15m",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:09Z"
-    },
-    {
-      "id": "aether-f02dbf58d6c9ef",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "atr_breakout",
-            "params": {
-              "atr_mult": 2.0,
-              "atr_period": 14,
-              "long_only": false
-            }
-          },
-          {
-            "engine": "rsi",
-            "params": {
-              "long_only": false,
-              "overbought": 55,
-              "oversold": 45,
-              "period": 14
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "atr_breakout",
-          "params": {
-            "atr_mult": 2.0,
-            "atr_period": 14,
-            "long_only": false
-          }
-        },
-        {
-          "engine": "rsi",
-          "params": {
-            "long_only": false,
-            "overbought": 55,
-            "oversold": 45,
-            "period": 14
-          }
-        }
-      ],
-      "asset": "ETHUSDT",
-      "timeframe": "4h",
-      "score": 0.6455,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "ATR breakout em zona de trend RSI / 4h",
-        "pnl_pct": 161.0536,
-        "sharpe": 1.5544,
-        "mdd_pct": 22.2492,
-        "trade_count": 99,
-        "hit_rate": 0.7857,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-09T15:42:26Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=132.88% wf=6/8 regime=5/5",
-        "combo_count": 6
-      },
-      "source_node_id": "llmhyp:atr-breakout-rsi-zona-trend-1h:tf:4h",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T15:43:41Z"
-    },
-    {
-      "id": "aether-8408f08b4ec704",
+      "id": "aether-1aa66a712025d4",
       "engine": "combo",
       "params": {
         "mode": "consensus",
@@ -1985,18 +236,21 @@
           {
             "engine": "macd",
             "params": {
-              "fast": 14,
-              "long_only": false,
-              "signal": 10,
-              "slow": 30
+              "fast": 12,
+              "long_only": true,
+              "signal": 9,
+              "slow": 26
             }
           },
           {
-            "engine": "zscore",
+            "engine": "regime_filter",
             "params": {
-              "long_only": false,
-              "threshold": 0.85,
-              "window": 23
+              "long_only": true,
+              "ma_window": 80,
+              "method": "trend_align",
+              "slope_window": 15,
+              "vol_percentile_max": 0.7,
+              "vol_window": 30
             }
           }
         ]
@@ -2005,122 +259,258 @@
         {
           "engine": "macd",
           "params": {
-            "fast": 14,
-            "long_only": false,
-            "signal": 10,
-            "slow": 30
+            "fast": 12,
+            "long_only": true,
+            "signal": 9,
+            "slow": 26
           }
         },
         {
-          "engine": "zscore",
+          "engine": "regime_filter",
           "params": {
-            "long_only": false,
-            "threshold": 0.85,
-            "window": 23
+            "long_only": true,
+            "ma_window": 80,
+            "method": "trend_align",
+            "slope_window": 15,
+            "vol_percentile_max": 0.7,
+            "vol_window": 30
           }
         }
       ],
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.6336,
+      "asset": "DOGEUSDT",
+      "timeframe": "4h",
+      "score": 0.6204,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Mutacao de MACD cruzando zero com z-score extremo / 1d",
-        "pnl_pct": 47.9516,
-        "sharpe": 1.377,
-        "mdd_pct": 6.014,
-        "trade_count": 38,
-        "hit_rate": 0.6842,
+        "name": "MACD Momentum Aligned with Trend Filter 15m / 4h",
+        "pnl_pct": 449.0413,
+        "sharpe": 2.0853,
+        "mdd_pct": 29.5513,
+        "trade_count": 68,
+        "hit_rate": 0.4627,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:07:44Z",
+        "validated_at": "2026-05-13T11:49:06Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=50.22% wf=6/6 regime=4/4",
-        "combo_count": 6
+        "critic_reason": "approved cross_pass=2/3 perturb_med=399.04% wf=5/6 regime=3/5",
+        "combo_count": 9
       },
-      "source_node_id": "mut:llmhyp:macd-zero-cross-zscore-:57d568f6b1",
+      "source_node_id": "llmhyp:macd-momentum-trend-aligned-15m:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:09Z"
+      "deployed_at": "2026-05-18T18:19:29Z"
     },
     {
-      "id": "aether-09bc59c44a4059",
+      "id": "aether-eb993319a10477",
       "engine": "combo",
       "params": {
         "mode": "consensus",
         "specs": [
           {
-            "engine": "vol_compression",
+            "engine": "macd",
             "params": {
-              "atr_window": 14,
-              "breakout_window": 20,
-              "long_only": false,
-              "percentile_max": 30,
-              "percentile_window": 120
+              "fast": 12,
+              "long_only": true,
+              "signal": 9,
+              "slow": 26
             }
           },
           {
-            "engine": "rsi",
+            "engine": "regime_filter",
             "params": {
-              "long_only": false,
-              "overbought": 70,
-              "oversold": 30,
-              "period": 14
+              "long_only": true,
+              "ma_window": 80,
+              "method": "trend_align",
+              "slope_window": 20,
+              "vol_percentile_max": 85,
+              "vol_window": 30
             }
           }
         ]
       },
       "probe_specs": [
         {
-          "engine": "vol_compression",
+          "engine": "macd",
           "params": {
-            "atr_window": 14,
-            "breakout_window": 20,
-            "long_only": false,
-            "percentile_max": 30,
-            "percentile_window": 120
+            "fast": 12,
+            "long_only": true,
+            "signal": 9,
+            "slow": 26
           }
         },
         {
-          "engine": "rsi",
+          "engine": "regime_filter",
           "params": {
-            "long_only": false,
-            "overbought": 70,
-            "oversold": 30,
-            "period": 14
+            "long_only": true,
+            "ma_window": 80,
+            "method": "trend_align",
+            "slope_window": 20,
+            "vol_percentile_max": 85,
+            "vol_window": 30
           }
         }
       ],
-      "asset": "XRPUSDT",
+      "asset": "DOGEUSDT",
       "timeframe": "4h",
-      "score": 0.6331,
+      "score": 0.6055,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Compressao de vol confirmada por RSI saindo de extremo / 4h",
-        "pnl_pct": 86.128,
-        "sharpe": 1.1052,
-        "mdd_pct": 20.1942,
-        "trade_count": 123,
-        "hit_rate": 0.4146,
+        "name": "MACD + Regime Trend-Align Swing 4h / 4h",
+        "pnl_pct": 385.641,
+        "sharpe": 1.9599,
+        "mdd_pct": 28.9218,
+        "trade_count": 66,
+        "hit_rate": 0.4615,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T02:36:42Z",
+        "validated_at": "2026-05-13T13:57:06Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=86.13% wf=6/8 regime=3/5",
-        "combo_count": 6
+        "critic_reason": "approved cross_pass=2/3 perturb_med=350.45% wf=4/6 regime=3/5",
+        "combo_count": 9
       },
-      "source_node_id": "llmhyp:vol-compression-rsi-extreme:tf:4h",
+      "source_node_id": "llmhyp:macd-regime-aligned-swing-4h:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:09Z"
+      "deployed_at": "2026-05-18T18:19:29Z"
+    },
+    {
+      "id": "aether-897523f65a1ed8",
+      "source": "aether_happynation",
+      "node_id": "llmhyp:macd-zero-cross-trend-align-1h:tf:4h",
+      "campaign_id": "aether_current",
+      "engine": "combo",
+      "params": {
+        "mode": "consensus",
+        "specs": [
+          {
+            "engine": "macd",
+            "params": {
+              "fast": 12,
+              "long_only": true,
+              "signal": 9,
+              "slow": 26
+            }
+          },
+          {
+            "engine": "regime_filter",
+            "params": {
+              "long_only": true,
+              "ma_window": 80,
+              "method": "trend_align",
+              "slope_window": 20,
+              "vol_percentile_max": 75,
+              "vol_window": 30
+            }
+          }
+        ]
+      },
+      "probe_specs": [
+        {
+          "engine": "macd",
+          "params": {
+            "fast": 12,
+            "long_only": true,
+            "signal": 9,
+            "slow": 26
+          }
+        },
+        {
+          "engine": "regime_filter",
+          "params": {
+            "long_only": true,
+            "ma_window": 80,
+            "method": "trend_align",
+            "slope_window": 20,
+            "vol_percentile_max": 75,
+            "vol_window": 30
+          }
+        }
+      ],
+      "asset": "DOGEUSDT",
+      "symbol": "DOGEUSDT",
+      "timeframe": "4h",
+      "score": 0.6049,
+      "readiness": "paper_ready",
+      "summary": {
+        "name": "MACD Zero Cross em Trend Align Regime 1h / 4h",
+        "pnl_pct": 388.8464,
+        "sharpe": 1.9676,
+        "mdd_pct": 28.9218,
+        "trade_count": 65,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=2/3 perturb_med=354.15% wf=4/6 regime=3/5",
+        "best_probe": {
+          "_agent_role": "agent_4h",
+          "_node_id": "llmhyp:macd-zero-cross-trend-align-1h:tf:4h",
+          "_task_id": "scout:llmhyp:macd-zero-cross-trend-align-1h:tf:4h",
+          "bars": 4380,
+          "capital": 10000.0,
+          "dataset_id": "binance:DOGEUSDT:4h",
+          "elapsed_s": 1.741,
+          "engine": "combo",
+          "fee_bps": 10.0,
+          "final_equity": 48884.6404,
+          "fraction": 0.1,
+          "hit_rate": 0.4615,
+          "leverage": 2.0,
+          "mdd_pct": 28.9218,
+          "ok": true,
+          "params": {
+            "mode": "consensus",
+            "specs": [
+              {
+                "engine": "macd",
+                "params": {
+                  "fast": 12,
+                  "long_only": true,
+                  "signal": 9,
+                  "slow": 26
+                }
+              },
+              {
+                "engine": "regime_filter",
+                "params": {
+                  "long_only": true,
+                  "ma_window": 80,
+                  "method": "trend_align",
+                  "slope_window": 20,
+                  "vol_percentile_max": 75,
+                  "vol_window": 30
+                }
+              }
+            ]
+          },
+          "pnl_pct": 388.8464,
+          "probe_id": "4h:binance:DOGEUSDT:4h:combo:4194fe78e4",
+          "sharpe": 1.9676,
+          "slippage_bps": 2.0,
+          "spread_bps": 0.0,
+          "symbol": "DOGEUSDT",
+          "timeframe": "4h",
+          "total_pnl": 38884.6404,
+          "trade_count": 65
+        },
+        "happynation_deploy_reason": "paper_ready + critic approved + diversified batch",
+        "ranking_pnl_pct": 388.8464,
+        "ranking_trade_count": 65,
+        "ranking_mdd_pct": 28.9218
+      },
+      "risk": {
+        "take_profit_pct": null,
+        "stop_loss_pct": null,
+        "max_hold_candles": null
+      },
+      "deployed_at": "2026-05-16T03:21:51Z"
     },
     {
       "id": "aether-367f60fcf7c2ad",
@@ -2197,10 +587,61 @@
       },
       "source_node_id": "llmhyp:rsi-extreme-regime-low-vol-breakout:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:09Z"
+      "deployed_at": "2026-05-16T03:20:39Z"
     },
     {
-      "id": "aether-4d08c2662a53eb",
+      "id": "aether-2ec147c48b18ef",
+      "engine": "stochastic",
+      "params": {
+        "long_only": false,
+        "overbought": 88,
+        "oversold": 12,
+        "period": 28,
+        "smooth_d": 3,
+        "smooth_k": 3
+      },
+      "probe_specs": [
+        {
+          "engine": "stochastic",
+          "params": {
+            "long_only": false,
+            "overbought": 88,
+            "oversold": 12,
+            "period": 28,
+            "smooth_d": 3,
+            "smooth_k": 3
+          }
+        }
+      ],
+      "asset": "LINKUSDT",
+      "timeframe": "15m",
+      "score": 0.5909,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Stochastic Deep Extreme Swing 4h / 15m",
+        "pnl_pct": 67.72,
+        "sharpe": 1.7888,
+        "mdd_pct": 27.7915,
+        "trade_count": 66,
+        "hit_rate": 0.6183,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-12T03:51:10Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=2/3 perturb_med=37.19% wf=6/6 regime=2/3",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:stochastic-deep-swing-4h:tf:15m",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-18T18:19:29Z"
+    },
+    {
+      "id": "aether-025bbd5749cec7",
       "engine": "combo",
       "params": {
         "mode": "consensus",
@@ -2208,18 +649,18 @@
           {
             "engine": "macd",
             "params": {
-              "fast": 10,
+              "fast": 12,
               "long_only": false,
-              "signal": 10,
-              "slow": 30
+              "signal": 9,
+              "slow": 26
             }
           },
           {
-            "engine": "zscore",
+            "engine": "vwap_dev",
             "params": {
               "long_only": false,
-              "threshold": 0.85,
-              "window": 17
+              "window": 50,
+              "z_threshold": 2.0
             }
           }
         ]
@@ -2228,464 +669,948 @@
         {
           "engine": "macd",
           "params": {
-            "fast": 10,
+            "fast": 12,
             "long_only": false,
-            "signal": 10,
-            "slow": 30
-          }
-        },
-        {
-          "engine": "zscore",
-          "params": {
-            "long_only": false,
-            "threshold": 0.85,
-            "window": 17
-          }
-        }
-      ],
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.6198,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Mutacao de MACD cruzando zero com z-score extremo / 1d",
-        "pnl_pct": 42.9041,
-        "sharpe": 1.2493,
-        "mdd_pct": 6.3539,
-        "trade_count": 41,
-        "hit_rate": 0.7073,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:16:44Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=34.83% wf=6/6 regime=4/4",
-        "combo_count": 6
-      },
-      "source_node_id": "mut:llmhyp:macd-zero-cross-zscore-:40aee4170d",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:09Z"
-    },
-    {
-      "id": "aether-bd3795e27d48b7",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "adx",
-            "params": {
-              "long_only": false,
-              "period": 16,
-              "threshold": 24
-            }
-          },
-          {
-            "engine": "vwap_dev",
-            "params": {
-              "long_only": false,
-              "window": 26,
-              "z_threshold": 0.575
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "adx",
-          "params": {
-            "long_only": false,
-            "period": 16,
-            "threshold": 24
+            "signal": 9,
+            "slow": 26
           }
         },
         {
           "engine": "vwap_dev",
           "params": {
             "long_only": false,
-            "window": 26,
-            "z_threshold": 0.575
+            "window": 50,
+            "z_threshold": 2.0
           }
         }
       ],
-      "asset": "ADAUSDT",
+      "asset": "ETHUSDT",
       "timeframe": "4h",
-      "score": 0.5633,
+      "score": 0.6503,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Mutacao de ADX forte com VWAP neutra / 4h",
-        "pnl_pct": 33.7358,
-        "sharpe": 0.8445,
-        "mdd_pct": 15.3053,
-        "trade_count": 75,
-        "hit_rate": 0.5467,
+        "name": "MACD histogram virando contra VWAP dev 1h / 4h",
+        "pnl_pct": 28.5318,
+        "sharpe": 1.5508,
+        "mdd_pct": 7.8157,
+        "trade_count": 42,
+        "hit_rate": 0.6905,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:25:17Z",
+        "validated_at": "2026-05-10T03:33:09Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=31.31% wf=6/6 regime=4/5",
+        "critic_reason": "approved cross_pass=2/4 perturb_med=31.51% wf=8/8 regime=3/5",
         "combo_count": 6
       },
-      "source_node_id": "mut:llmhyp:adx-vwap-trend-equilibr:b6d274147f",
+      "source_node_id": "llmhyp:macd-histogram-vwap-dev-1h:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:09Z"
+      "deployed_at": "2026-05-10T03:34:54Z"
     },
     {
-      "id": "aether-fbb192c7578bc9",
+      "id": "aether-7afda6dcf94415",
       "engine": "combo",
       "params": {
         "mode": "consensus",
         "specs": [
           {
-            "engine": "atr_breakout",
+            "engine": "cci",
             "params": {
-              "atr_mult": 1.275,
-              "atr_period": 12,
-              "long_only": false
+              "long_only": false,
+              "period": 20,
+              "threshold": 150
             }
           },
           {
-            "engine": "vwap_dev",
+            "engine": "regime_filter",
             "params": {
               "long_only": false,
-              "window": 26,
-              "z_threshold": 1.15
+              "ma_window": 80,
+              "method": "trend_align",
+              "slope_window": 15,
+              "vol_percentile_max": 100,
+              "vol_window": 30
             }
           }
         ]
       },
       "probe_specs": [
         {
-          "engine": "atr_breakout",
+          "engine": "cci",
           "params": {
-            "atr_mult": 1.275,
-            "atr_period": 12,
-            "long_only": false
+            "long_only": false,
+            "period": 20,
+            "threshold": 150
           }
         },
         {
-          "engine": "vwap_dev",
+          "engine": "regime_filter",
           "params": {
             "long_only": false,
-            "window": 26,
-            "z_threshold": 1.15
+            "ma_window": 80,
+            "method": "trend_align",
+            "slope_window": 15,
+            "vol_percentile_max": 100,
+            "vol_window": 30
           }
         }
       ],
       "asset": "LINKUSDT",
-      "timeframe": "1d",
-      "score": 0.5479,
+      "timeframe": "4h",
+      "score": 0.6426,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Mutacao de ATR breakout com VWAP confirmando fluxo / 1d",
-        "pnl_pct": 99.1122,
-        "sharpe": 1.2029,
-        "mdd_pct": 14.231,
-        "trade_count": 30,
-        "hit_rate": 0.8333,
+        "name": "CCI Extreme + Trend Align 4h Swing / 4h",
+        "pnl_pct": 33.3939,
+        "sharpe": 1.335,
+        "mdd_pct": 5.8822,
+        "trade_count": 47,
+        "hit_rate": 0.7021,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T13:33:48Z",
+        "validated_at": "2026-05-14T05:21:27Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=42.70% wf=5/6 regime=2/4",
-        "combo_count": 6
+        "critic_reason": "approved cross_pass=2/3 perturb_med=19.51% wf=6/6 regime=4/5",
+        "combo_count": 9
       },
-      "source_node_id": "mut:llmhyp:atr-breakout-vwap-flow-:186a11c14e",
+      "source_node_id": "llmhyp:cci-trend-align-4h-swing:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
+      "deployed_at": "2026-05-18T18:19:29Z"
     },
     {
-      "id": "aether-e0743b612b1558",
+      "id": "aether-025b6e1cd18fa3",
       "engine": "combo",
       "params": {
         "mode": "consensus",
         "specs": [
           {
-            "engine": "adx",
+            "engine": "williams_r",
             "params": {
               "long_only": false,
-              "period": 16,
-              "threshold": 32
+              "overbought": -20,
+              "oversold": -80,
+              "period": 21
             }
           },
           {
-            "engine": "vwap_dev",
+            "engine": "roc",
             "params": {
               "long_only": false,
-              "window": 26,
-              "z_threshold": 0.575
+              "lower": -5,
+              "period": 15,
+              "upper": 5
             }
           }
         ]
       },
       "probe_specs": [
         {
-          "engine": "adx",
+          "engine": "williams_r",
           "params": {
             "long_only": false,
-            "period": 16,
-            "threshold": 32
+            "overbought": -20,
+            "oversold": -80,
+            "period": 21
           }
         },
         {
-          "engine": "vwap_dev",
+          "engine": "roc",
           "params": {
             "long_only": false,
-            "window": 26,
-            "z_threshold": 0.575
+            "lower": -5,
+            "period": 15,
+            "upper": 5
+          }
+        }
+      ],
+      "asset": "ADAUSDT",
+      "timeframe": "1d",
+      "score": 0.5817,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Williams %R extreme + ROC reversal 1h / 1d",
+        "pnl_pct": 87.0773,
+        "sharpe": 1.2544,
+        "mdd_pct": 11.3211,
+        "trade_count": 36,
+        "hit_rate": 0.5833,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-11T03:57:28Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/4 perturb_med=40.86% wf=6/8 regime=4/4",
+        "combo_count": 6
+      },
+      "source_node_id": "llmhyp:williams-r-extreme-roc-confirm-1h:tf:1d",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-16T03:20:39Z"
+    },
+    {
+      "id": "aether-a1343ea4120324",
+      "engine": "combo",
+      "params": {
+        "mode": "consensus",
+        "specs": [
+          {
+            "engine": "roc",
+            "params": {
+              "long_only": false,
+              "lower": -5.0,
+              "period": 14,
+              "upper": 5.0
+            }
+          },
+          {
+            "engine": "williams_r",
+            "params": {
+              "long_only": false,
+              "overbought": -10,
+              "oversold": -90,
+              "period": 14
+            }
+          }
+        ]
+      },
+      "probe_specs": [
+        {
+          "engine": "roc",
+          "params": {
+            "long_only": false,
+            "lower": -5.0,
+            "period": 14,
+            "upper": 5.0
+          }
+        },
+        {
+          "engine": "williams_r",
+          "params": {
+            "long_only": false,
+            "overbought": -10,
+            "oversold": -90,
+            "period": 14
           }
         }
       ],
       "asset": "ADAUSDT",
       "timeframe": "4h",
-      "score": 0.5444,
+      "score": 0.5942,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Mutacao de ADX forte com VWAP neutra / 4h",
-        "pnl_pct": 32.5529,
-        "sharpe": 0.9039,
-        "mdd_pct": 11.3873,
-        "trade_count": 41,
-        "hit_rate": 0.5854,
+        "name": "ROC Momentum Extreme + Williams %R Reversal 1h / 4h",
+        "pnl_pct": 58.2465,
+        "sharpe": 1.4076,
+        "mdd_pct": 14.8111,
+        "trade_count": 46,
+        "hit_rate": 0.6087,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:26:17Z",
+        "validated_at": "2026-05-13T08:36:49Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=40.71% wf=6/6 regime=4/5",
-        "combo_count": 6
+        "critic_reason": "approved cross_pass=3/3 perturb_med=50.09% wf=5/6 regime=4/5",
+        "combo_count": 9
       },
-      "source_node_id": "mut:llmhyp:adx-vwap-trend-equilibr:311ef33852",
+      "source_node_id": "llmhyp:roc-extreme-williams-reversal-1h:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
+      "deployed_at": "2026-05-16T03:20:39Z"
     },
     {
-      "id": "aether-7f867b596196e5",
+      "id": "aether-96573d932d7736",
       "engine": "combo",
       "params": {
         "mode": "consensus",
         "specs": [
           {
-            "engine": "atr_breakout",
+            "engine": "structure_break",
             "params": {
-              "atr_mult": 1.725,
-              "atr_period": 12,
-              "long_only": false
+              "confirm_bars": 1,
+              "long_only": false,
+              "swing_lookback": 20
             }
           },
           {
-            "engine": "zscore",
+            "engine": "regime_filter",
             "params": {
               "long_only": false,
-              "threshold": 0.85,
-              "window": 17
+              "ma_window": 50,
+              "method": "high_vol_fade",
+              "slope_window": 20,
+              "vol_percentile_max": 100,
+              "vol_window": 60
             }
           }
         ]
       },
       "probe_specs": [
         {
-          "engine": "atr_breakout",
+          "engine": "structure_break",
           "params": {
-            "atr_mult": 1.725,
-            "atr_period": 12,
-            "long_only": false
+            "confirm_bars": 1,
+            "long_only": false,
+            "swing_lookback": 20
           }
         },
         {
-          "engine": "zscore",
+          "engine": "regime_filter",
           "params": {
             "long_only": false,
-            "threshold": 0.85,
-            "window": 17
+            "ma_window": 50,
+            "method": "high_vol_fade",
+            "slope_window": 20,
+            "vol_percentile_max": 100,
+            "vol_window": 60
           }
         }
       ],
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.5403,
+      "asset": "ADAUSDT",
+      "timeframe": "1h",
+      "score": 0.6022,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Mutacao de ATR breakout com z-score baixo favoravel / 1d",
-        "pnl_pct": 83.5786,
-        "sharpe": 1.097,
-        "mdd_pct": 20.2346,
-        "trade_count": 59,
-        "hit_rate": 0.7586,
+        "name": "Structure break + vol confirm 1d / 1h",
+        "pnl_pct": 46.1558,
+        "sharpe": 1.2409,
+        "mdd_pct": 12.3334,
+        "trade_count": 55,
+        "hit_rate": 0.7818,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:25:17Z",
+        "validated_at": "2026-05-10T13:46:26Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=3/3 perturb_med=66.04% wf=6/6 regime=2/4",
+        "critic_reason": "approved cross_pass=3/4 perturb_med=42.84% wf=6/8 regime=4/5",
         "combo_count": 6
       },
-      "source_node_id": "mut:llmhyp:atr-breakout-zscore-bai:a9b463f2b1",
+      "source_node_id": "llmhyp:structure-break-vol-confirm-1d:tf:1h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
+      "deployed_at": "2026-05-16T03:20:39Z"
     },
     {
-      "id": "aether-b0e8ab5f5446cc",
+      "id": "aether-98f25d4611d73e",
       "engine": "combo",
       "params": {
         "mode": "consensus",
         "specs": [
-          {
-            "engine": "atr_breakout",
-            "params": {
-              "atr_mult": 1.725,
-              "atr_period": 12,
-              "long_only": false
-            }
-          },
           {
             "engine": "vwap_dev",
             "params": {
               "long_only": false,
-              "window": 34,
-              "z_threshold": 0.85
+              "window": 50,
+              "z_threshold": 2.0
+            }
+          },
+          {
+            "engine": "obv_trend",
+            "params": {
+              "long_only": false,
+              "window": 20
             }
           }
         ]
       },
       "probe_specs": [
         {
-          "engine": "atr_breakout",
-          "params": {
-            "atr_mult": 1.725,
-            "atr_period": 12,
-            "long_only": false
-          }
-        },
-        {
           "engine": "vwap_dev",
           "params": {
             "long_only": false,
-            "window": 34,
-            "z_threshold": 0.85
+            "window": 50,
+            "z_threshold": 2.0
+          }
+        },
+        {
+          "engine": "obv_trend",
+          "params": {
+            "long_only": false,
+            "window": 20
           }
         }
       ],
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.5361,
+      "asset": "SOLUSDT",
+      "timeframe": "4h",
+      "score": 0.6374,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Mutacao de ATR breakout com VWAP confirmando fluxo / 1d",
-        "pnl_pct": 71.7462,
-        "sharpe": 1.0402,
-        "mdd_pct": 14.502,
-        "trade_count": 37,
-        "hit_rate": 0.8056,
+        "name": "VWAP dev fade com OBV slope confirm 15m / 4h",
+        "pnl_pct": 25.3717,
+        "sharpe": 1.3983,
+        "mdd_pct": 4.894,
+        "trade_count": 34,
+        "hit_rate": 0.6471,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:27:17Z",
+        "validated_at": "2026-05-11T07:13:29Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=60.99% wf=6/6 regime=3/4",
+        "critic_reason": "approved cross_pass=3/4 perturb_med=18.05% wf=7/8 regime=3/5",
         "combo_count": 6
       },
-      "source_node_id": "mut:llmhyp:atr-breakout-vwap-flow-:b296d38c5a",
+      "source_node_id": "llmhyp:vwap-deviation-volume-confirm-15m:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
+      "deployed_at": "2026-05-11T07:15:21Z"
     },
     {
-      "id": "aether-6f102752237533",
+      "id": "aether-cc261888b2ed0b",
       "engine": "combo",
       "params": {
         "mode": "consensus",
         "specs": [
           {
-            "engine": "atr_breakout",
+            "engine": "cci",
             "params": {
-              "atr_mult": 1.725,
-              "atr_period": 12,
-              "long_only": false
+              "long_only": false,
+              "period": 20,
+              "threshold": 100
+            }
+          },
+          {
+            "engine": "regime_filter",
+            "params": {
+              "long_only": false,
+              "ma_window": 80,
+              "method": "trend_align",
+              "slope_window": 15,
+              "vol_percentile_max": 75,
+              "vol_window": 25
+            }
+          }
+        ]
+      },
+      "probe_specs": [
+        {
+          "engine": "cci",
+          "params": {
+            "long_only": false,
+            "period": 20,
+            "threshold": 100
+          }
+        },
+        {
+          "engine": "regime_filter",
+          "params": {
+            "long_only": false,
+            "ma_window": 80,
+            "method": "trend_align",
+            "slope_window": 15,
+            "vol_percentile_max": 75,
+            "vol_window": 25
+          }
+        }
+      ],
+      "asset": "LINKUSDT",
+      "timeframe": "4h",
+      "score": 0.5773,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "CCI zero-cross com regime trend confirmado 4h / 4h",
+        "pnl_pct": 44.8471,
+        "sharpe": 0.9838,
+        "mdd_pct": 20.8933,
+        "trade_count": 96,
+        "hit_rate": 0.5833,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-11T10:29:41Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=2/4 perturb_med=32.55% wf=5/8 regime=4/5",
+        "combo_count": 6
+      },
+      "source_node_id": "llmhyp:cci-trend-align-4h:tf:4h",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-18T18:19:29Z"
+    },
+    {
+      "id": "aether-94078e0bf921d6",
+      "engine": "donchian",
+      "params": {
+        "entry_window": 30,
+        "exit_window": 20,
+        "long_only": false
+      },
+      "probe_specs": [
+        {
+          "engine": "donchian",
+          "params": {
+            "entry_window": 30,
+            "exit_window": 20,
+            "long_only": false
+          }
+        }
+      ],
+      "asset": "ADAUSDT",
+      "timeframe": "15m",
+      "score": 0.5756,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Donchian range breakout 4h/1d / donchian entry_window=30 (M3)",
+        "pnl_pct": 60.1394,
+        "sharpe": 1.9317,
+        "mdd_pct": 25.2216,
+        "trade_count": 33,
+        "hit_rate": 0.4688,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-16T18:11:53Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=48.08% wf=4/6 regime=2/3 grid_pos=1.00 sharpe_p5=-0.26 pos_frac=0.92",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:donchian-range-breakout-4h-1d:tf:15m:mut:entry-window-30-3ccd6a",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-16T18:15:33Z"
+    },
+    {
+      "id": "aether-4e47f931cd991a",
+      "engine": "combo",
+      "params": {
+        "mode": "consensus",
+        "specs": [
+          {
+            "engine": "macd",
+            "params": {
+              "fast": 12,
+              "long_only": false,
+              "signal": 9,
+              "slow": 26
+            }
+          },
+          {
+            "engine": "regime_filter",
+            "params": {
+              "long_only": false,
+              "ma_window": 60,
+              "method": "high_vol_fade",
+              "slope_window": 15,
+              "vol_percentile_max": 100,
+              "vol_window": 20
+            }
+          }
+        ]
+      },
+      "probe_specs": [
+        {
+          "engine": "macd",
+          "params": {
+            "fast": 12,
+            "long_only": false,
+            "signal": 9,
+            "slow": 26
+          }
+        },
+        {
+          "engine": "regime_filter",
+          "params": {
+            "long_only": false,
+            "ma_window": 60,
+            "method": "high_vol_fade",
+            "slope_window": 15,
+            "vol_percentile_max": 100,
+            "vol_window": 20
+          }
+        }
+      ],
+      "asset": "BTCUSDT",
+      "timeframe": "1h",
+      "score": 0.6077,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "MACD cross em high-vol fade 1h / 1h",
+        "pnl_pct": 20.9266,
+        "sharpe": 1.3491,
+        "mdd_pct": 3.2546,
+        "trade_count": 30,
+        "hit_rate": 0.7667,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-11T05:55:26Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=2/4 perturb_med=18.31% wf=7/8 regime=4/5",
+        "combo_count": 6
+      },
+      "source_node_id": "llmhyp:macd-high-vol-fade-1h:tf:1h",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-16T03:20:39Z"
+    },
+    {
+      "id": "aether-02f15a010e3f1f",
+      "engine": "keltner",
+      "params": {
+        "atr_mult": 4.0,
+        "long_only": false,
+        "window": 60
+      },
+      "probe_specs": [
+        {
+          "engine": "keltner",
+          "params": {
+            "atr_mult": 4.0,
+            "long_only": false,
+            "window": 60
+          }
+        }
+      ],
+      "asset": "LINKUSDT",
+      "timeframe": "4h",
+      "score": 0.5112,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Keltner Deep Breakout Position 1d / 4h",
+        "pnl_pct": 37.3052,
+        "sharpe": 0.6412,
+        "mdd_pct": 23.556,
+        "trade_count": 92,
+        "hit_rate": 0.6413,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-12T03:50:10Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=29.26% wf=4/6 regime=3/5",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:keltner-position-deep-1d:tf:4h",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-18T18:19:29Z"
+    },
+    {
+      "id": "aether-c33652bef0365a",
+      "engine": "zscore",
+      "params": {
+        "long_only": false,
+        "threshold": 3.0,
+        "window": 100
+      },
+      "probe_specs": [
+        {
+          "engine": "zscore",
+          "params": {
+            "long_only": false,
+            "threshold": 3.0,
+            "window": 100
+          }
+        }
+      ],
+      "asset": "SOLUSDT",
+      "timeframe": "4h",
+      "score": 0.543,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Z-Score Deep Mean Revert 1h / 4h",
+        "pnl_pct": 27.5826,
+        "sharpe": 0.858,
+        "mdd_pct": 8.2938,
+        "trade_count": 31,
+        "hit_rate": 0.7419,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-11T14:35:35Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/4 perturb_med=19.65% wf=6/8 regime=2/5",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:zscore-mean-revert-deep-1h:tf:4h",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-11T14:36:40Z"
+    },
+    {
+      "id": "aether-392df5dd2d8250",
+      "engine": "regime_filter",
+      "params": {
+        "long_only": true,
+        "ma_window": 80,
+        "method": "high_vol_fade",
+        "slope_window": 20,
+        "vol_percentile_max": 80,
+        "vol_window": 20
+      },
+      "probe_specs": [
+        {
+          "engine": "regime_filter",
+          "params": {
+            "long_only": true,
+            "ma_window": 80,
+            "method": "high_vol_fade",
+            "slope_window": 20,
+            "vol_percentile_max": 80,
+            "vol_window": 20
+          }
+        }
+      ],
+      "asset": "ETHUSDT",
+      "timeframe": "15m",
+      "score": 0.5053,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Vol exhaustion fade 1h / 15m",
+        "pnl_pct": 11.5967,
+        "sharpe": 1.3377,
+        "mdd_pct": 10.9044,
+        "trade_count": 37,
+        "hit_rate": 0.7027,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-15T06:02:11Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=2/3 perturb_med=11.60% wf=6/6 regime=2/3",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:vol-exhaustion-fade-1h:tf:15m",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-15T06:23:20Z"
+    },
+    {
+      "id": "aether-993af555734700",
+      "engine": "stochastic",
+      "params": {
+        "long_only": false,
+        "overbought": 85,
+        "oversold": 15,
+        "period": 14,
+        "smooth_d": 3,
+        "smooth_k": 3
+      },
+      "probe_specs": [
+        {
+          "engine": "stochastic",
+          "params": {
+            "long_only": false,
+            "overbought": 85,
+            "oversold": 15,
+            "period": 14,
+            "smooth_d": 3,
+            "smooth_k": 3
+          }
+        }
+      ],
+      "asset": "BTCUSDT",
+      "timeframe": "15m",
+      "score": 0.8662,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Stochastic overbought fade 4h / 15m",
+        "pnl_pct": 94.2282,
+        "sharpe": 2.9485,
+        "mdd_pct": 19.3002,
+        "trade_count": 116,
+        "hit_rate": 0.6348,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-10T18:16:36Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/4 perturb_med=70.43% wf=5/8 regime=3/3",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:stochastic-overbought-fade-4h:tf:15m",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-19T02:53:15Z"
+    },
+    {
+      "id": "aether-4d7a30709fe591",
+      "engine": "combo",
+      "params": {
+        "mode": "consensus",
+        "specs": [
+          {
+            "engine": "regime_filter",
+            "params": {
+              "long_only": false,
+              "ma_window": 100,
+              "method": "high_vol_fade",
+              "slope_window": 20,
+              "vol_percentile_max": 100,
+              "vol_window": 30
             }
           },
           {
             "engine": "zscore",
             "params": {
               "long_only": false,
-              "threshold": 1.15,
-              "window": 17
+              "threshold": 2.5,
+              "window": 50
             }
           }
         ]
       },
       "probe_specs": [
         {
-          "engine": "atr_breakout",
+          "engine": "regime_filter",
           "params": {
-            "atr_mult": 1.725,
-            "atr_period": 12,
-            "long_only": false
+            "long_only": false,
+            "ma_window": 100,
+            "method": "high_vol_fade",
+            "slope_window": 20,
+            "vol_percentile_max": 100,
+            "vol_window": 30
           }
         },
         {
           "engine": "zscore",
           "params": {
             "long_only": false,
-            "threshold": 1.15,
-            "window": 17
+            "threshold": 2.5,
+            "window": 50
           }
         }
       ],
-      "asset": "BTCUSDT",
-      "timeframe": "1d",
-      "score": 0.5281,
+      "asset": "XRPUSDT",
+      "timeframe": "15m",
+      "score": 0.831,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Mutacao de ATR breakout com z-score baixo favoravel / 1d",
-        "pnl_pct": 75.4405,
-        "sharpe": 1.0925,
-        "mdd_pct": 20.8821,
-        "trade_count": 54,
-        "hit_rate": 0.7407,
+        "name": "Regime Filter High-Vol Fade Contrarian 1d / 15m",
+        "pnl_pct": 20.6585,
+        "sharpe": 3.0893,
+        "mdd_pct": 4.0546,
+        "trade_count": 44,
+        "hit_rate": 0.75,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:20:17Z",
+        "validated_at": "2026-05-13T09:41:54Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=67.67% wf=6/6 regime=3/4",
-        "combo_count": 6
+        "critic_reason": "approved cross_pass=1/3 perturb_med=20.66% wf=6/6 regime=2/3",
+        "combo_count": 9
       },
-      "source_node_id": "mut:llmhyp:atr-breakout-zscore-bai:7d53d9d771",
+      "source_node_id": "llmhyp:regime-filter-high-vol-fade-1d:tf:15m",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
+      "deployed_at": "2026-05-19T02:53:15Z"
     },
     {
-      "id": "aether-7c58802aa360ca",
+      "id": "aether-4e82e3a5d1f582",
+      "engine": "combo",
+      "params": {
+        "mode": "consensus",
+        "specs": [
+          {
+            "engine": "structure_break",
+            "params": {
+              "confirm_bars": 2,
+              "long_only": false,
+              "swing_lookback": 12
+            }
+          },
+          {
+            "engine": "mfi",
+            "params": {
+              "long_only": false,
+              "overbought": 80,
+              "oversold": 20,
+              "period": 14
+            }
+          }
+        ]
+      },
+      "probe_specs": [
+        {
+          "engine": "structure_break",
+          "params": {
+            "confirm_bars": 2,
+            "long_only": false,
+            "swing_lookback": 12
+          }
+        },
+        {
+          "engine": "mfi",
+          "params": {
+            "long_only": false,
+            "overbought": 80,
+            "oversold": 20,
+            "period": 14
+          }
+        }
+      ],
+      "asset": "BTCUSDT",
+      "timeframe": "15m",
+      "score": 0.6596,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Swing break com MFI volume 1d / 15m",
+        "pnl_pct": 22.8326,
+        "sharpe": 1.4793,
+        "mdd_pct": 15.4457,
+        "trade_count": 96,
+        "hit_rate": 0.6562,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-10T12:05:45Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/4 perturb_med=18.23% wf=6/8 regime=3/3",
+        "combo_count": 6
+      },
+      "source_node_id": "llmhyp:structure-break-mfi-1d:tf:15m",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-19T02:53:15Z"
+    },
+    {
+      "id": "aether-09bc59c44a4059",
       "engine": "combo",
       "params": {
         "mode": "consensus",
@@ -2693,20 +1618,20 @@
           {
             "engine": "vol_compression",
             "params": {
-              "atr_window": 12,
-              "breakout_window": 23,
+              "atr_window": 14,
+              "breakout_window": 20,
               "long_only": false,
-              "percentile_max": 34,
-              "percentile_window": 102
+              "percentile_max": 30,
+              "percentile_window": 120
             }
           },
           {
             "engine": "rsi",
             "params": {
               "long_only": false,
-              "overbought": 60,
-              "oversold": 34,
-              "period": 16
+              "overbought": 70,
+              "oversold": 30,
+              "period": 14
             }
           }
         ]
@@ -2715,52 +1640,52 @@
         {
           "engine": "vol_compression",
           "params": {
-            "atr_window": 12,
-            "breakout_window": 23,
+            "atr_window": 14,
+            "breakout_window": 20,
             "long_only": false,
-            "percentile_max": 34,
-            "percentile_window": 102
+            "percentile_max": 30,
+            "percentile_window": 120
           }
         },
         {
           "engine": "rsi",
           "params": {
             "long_only": false,
-            "overbought": 60,
-            "oversold": 34,
-            "period": 16
+            "overbought": 70,
+            "oversold": 30,
+            "period": 14
           }
         }
       ],
       "asset": "XRPUSDT",
       "timeframe": "4h",
-      "score": 0.5245,
+      "score": 0.6331,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Mutacao de Compressao de vol confirmada por RSI saindo de extremo / 4h",
-        "pnl_pct": 31.1108,
-        "sharpe": 0.6883,
-        "mdd_pct": 16.8966,
-        "trade_count": 69,
-        "hit_rate": 0.4638,
+        "name": "Compressao de vol confirmada por RSI saindo de extremo / 4h",
+        "pnl_pct": 86.128,
+        "sharpe": 1.1052,
+        "mdd_pct": 20.1942,
+        "trade_count": 123,
+        "hit_rate": 0.4146,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:16:44Z",
+        "validated_at": "2026-05-08T02:36:42Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=31.11% wf=4/6 regime=4/5",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=86.13% wf=6/8 regime=3/5",
         "combo_count": 6
       },
-      "source_node_id": "mut:llmhyp:vol-compression-rsi-ext:461f3ef13a",
+      "source_node_id": "llmhyp:vol-compression-rsi-extreme:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
+      "deployed_at": "2026-05-19T02:53:15Z"
     },
     {
-      "id": "aether-46d07ea895f36e",
+      "id": "aether-3d7c052f77626e",
       "engine": "combo",
       "params": {
         "mode": "consensus",
@@ -2768,18 +1693,21 @@
           {
             "engine": "macd",
             "params": {
-              "fast": 10,
-              "long_only": false,
-              "signal": 8,
-              "slow": 22
+              "fast": 12,
+              "long_only": true,
+              "signal": 9,
+              "slow": 26
             }
           },
           {
-            "engine": "zscore",
+            "engine": "regime_filter",
             "params": {
-              "long_only": false,
-              "threshold": 0.85,
-              "window": 23
+              "long_only": true,
+              "ma_window": 80,
+              "method": "trend_align",
+              "slope_window": 20,
+              "vol_percentile_max": 80,
+              "vol_window": 20
             }
           }
         ]
@@ -2788,47 +1716,251 @@
         {
           "engine": "macd",
           "params": {
-            "fast": 10,
-            "long_only": false,
-            "signal": 8,
-            "slow": 22
+            "fast": 12,
+            "long_only": true,
+            "signal": 9,
+            "slow": 26
           }
         },
         {
-          "engine": "zscore",
+          "engine": "regime_filter",
           "params": {
-            "long_only": false,
-            "threshold": 0.85,
-            "window": 23
+            "long_only": true,
+            "ma_window": 80,
+            "method": "trend_align",
+            "slope_window": 20,
+            "vol_percentile_max": 80,
+            "vol_window": 20
           }
         }
       ],
-      "asset": "XRPUSDT",
-      "timeframe": "1d",
-      "score": 0.5199,
+      "asset": "DOGEUSDT",
+      "timeframe": "4h",
+      "score": 0.6049,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Mutacao de MACD cruzando zero com z-score extremo / 1d",
-        "pnl_pct": 146.5603,
-        "sharpe": 0.8366,
-        "mdd_pct": 12.7411,
-        "trade_count": 36,
-        "hit_rate": 0.6111,
+        "name": "MACD com Regime Trend Align 1h / 4h",
+        "pnl_pct": 388.8464,
+        "sharpe": 1.9676,
+        "mdd_pct": 28.9218,
+        "trade_count": 65,
+        "hit_rate": 0.4615,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-08T16:07:44Z",
+        "validated_at": "2026-05-12T16:05:22Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=156.32% wf=5/6 regime=3/4",
+        "critic_reason": "approved cross_pass=2/3 perturb_med=354.15% wf=4/6 regime=3/5",
+        "combo_count": 9
+      },
+      "source_node_id": "llmhyp:macd-regime-trend-align-1h:tf:4h",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-19T02:53:15Z"
+    },
+    {
+      "id": "aether-41b304d9b97c3f",
+      "engine": "combo",
+      "params": {
+        "mode": "consensus",
+        "specs": [
+          {
+            "engine": "atr_breakout",
+            "params": {
+              "atr_mult": 2.0,
+              "atr_period": 14,
+              "long_only": false
+            }
+          },
+          {
+            "engine": "regime_filter",
+            "params": {
+              "long_only": false,
+              "ma_window": 50,
+              "method": "high_vol_fade",
+              "slope_window": 20,
+              "vol_percentile_max": 100,
+              "vol_window": 100
+            }
+          }
+        ]
+      },
+      "probe_specs": [
+        {
+          "engine": "atr_breakout",
+          "params": {
+            "atr_mult": 2.0,
+            "atr_period": 14,
+            "long_only": false
+          }
+        },
+        {
+          "engine": "regime_filter",
+          "params": {
+            "long_only": false,
+            "ma_window": 50,
+            "method": "high_vol_fade",
+            "slope_window": 20,
+            "vol_percentile_max": 100,
+            "vol_window": 100
+          }
+        }
+      ],
+      "asset": "DOGEUSDT",
+      "timeframe": "1h",
+      "score": 0.5915,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "ATR Breakout High-Vol Fade 15m / 1h",
+        "pnl_pct": 41.6539,
+        "sharpe": 0.9837,
+        "mdd_pct": 21.7376,
+        "trade_count": 109,
+        "hit_rate": 0.7339,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-13T03:53:50Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=2/3 perturb_med=30.92% wf=4/6 regime=3/5",
+        "combo_count": 9
+      },
+      "source_node_id": "llmhyp:atr-breakout-high-vol-fade-15m:tf:1h",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-19T02:53:15Z"
+    },
+    {
+      "id": "aether-707dfaf06b4e26",
+      "engine": "combo",
+      "params": {
+        "mode": "consensus",
+        "specs": [
+          {
+            "engine": "vol_compression",
+            "params": {
+              "atr_window": 20,
+              "breakout_window": 25,
+              "long_only": false,
+              "percentile_max": 0.2,
+              "percentile_window": 200
+            }
+          },
+          {
+            "engine": "regime_filter",
+            "params": {
+              "long_only": false,
+              "ma_window": 80,
+              "method": "low_vol_breakout",
+              "slope_window": 20,
+              "vol_percentile_max": 0.3,
+              "vol_window": 20
+            }
+          }
+        ]
+      },
+      "probe_specs": [
+        {
+          "engine": "vol_compression",
+          "params": {
+            "atr_window": 20,
+            "breakout_window": 25,
+            "long_only": false,
+            "percentile_max": 0.2,
+            "percentile_window": 200
+          }
+        },
+        {
+          "engine": "regime_filter",
+          "params": {
+            "long_only": false,
+            "ma_window": 80,
+            "method": "low_vol_breakout",
+            "slope_window": 20,
+            "vol_percentile_max": 0.3,
+            "vol_window": 20
+          }
+        }
+      ],
+      "asset": "ADAUSDT",
+      "timeframe": "4h",
+      "score": 0.5798,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Vol compression em regime low-vol breakout 4h / 4h",
+        "pnl_pct": 35.9224,
+        "sharpe": 0.7625,
+        "mdd_pct": 17.2333,
+        "trade_count": 101,
+        "hit_rate": 0.4059,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-11T03:53:27Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=2/4 perturb_med=39.30% wf=6/8 regime=2/5",
         "combo_count": 6
       },
-      "source_node_id": "mut:llmhyp:macd-zero-cross-zscore-:c61aa103e5",
+      "source_node_id": "llmhyp:vol-compression-regime-low-vol-4h:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-09T07:23:10Z"
+      "deployed_at": "2026-05-19T02:53:15Z"
+    },
+    {
+      "id": "aether-257b19c47b2f79",
+      "engine": "keltner",
+      "params": {
+        "atr_mult": 1.35,
+        "engine": "keltner",
+        "long_only": true,
+        "window": 14
+      },
+      "probe_specs": [
+        {
+          "engine": "keltner",
+          "params": {
+            "atr_mult": 1.35,
+            "engine": "keltner",
+            "long_only": true,
+            "window": 14
+          }
+        }
+      ],
+      "asset": "DOGEUSDT",
+      "timeframe": "1d",
+      "score": 0.5669,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Fade de extremo Keltner / Keltner curto reativo (M1)",
+        "pnl_pct": 149.6389,
+        "sharpe": 1.3142,
+        "mdd_pct": 15.6087,
+        "trade_count": 39,
+        "hit_rate": 0.6923,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-19T04:04:55Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=3/3 perturb_med=109.93% wf=6/6 regime=3/4",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:keltner-fade-extremo-5m:tf:1d:mut:llm-keltnerfast-6bf24e:mut:llm-keltner-curto-reativo-044ef9",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-05-19T04:06:23Z"
     }
   ]
 }
