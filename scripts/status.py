@@ -246,6 +246,28 @@ def utc_cutoff(minutes: int, now: datetime | None = None) -> str:
     return (base.astimezone(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def parse_utc_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def age_minutes_since(value: str | None, now: datetime | None = None) -> float | None:
+    parsed = parse_utc_ts(value)
+    if parsed is None:
+        return None
+    base = now or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    return max(0.0, (base.astimezone(timezone.utc) - parsed).total_seconds() / 60.0)
+
+
 def task_status_counts(conn: sqlite3.Connection, cutoff: str | None = None) -> dict[str, int]:
     try:
         rows = conn.execute(
@@ -271,6 +293,38 @@ def task_status_counts(conn: sqlite3.Connection, cutoff: str | None = None) -> d
         for row in recent_rows:
             counts[f"recent_{row['status']}"] = int(row["n"] or 0)
     return counts
+
+
+def task_runtime_details(conn: sqlite3.Connection, now: datetime | None = None) -> dict:
+    details: dict[str, object] = {}
+    try:
+        oldest = conn.execute(
+            "SELECT MIN(updated_at) AS oldest FROM tasks WHERE status='running'"
+        ).fetchone()
+    except sqlite3.Error:
+        oldest = None
+    oldest_at = str(oldest["oldest"] or "") if oldest and oldest["oldest"] else ""
+    if oldest_at:
+        details["oldest_running_at"] = oldest_at
+        details["oldest_running_age_min"] = round(age_minutes_since(oldest_at, now) or 0.0, 2)
+
+    try:
+        rows = conn.execute(
+            """
+            SELECT agent_role, COUNT(*) AS n
+            FROM tasks
+            WHERE status='running'
+            GROUP BY agent_role
+            ORDER BY n DESC, agent_role ASC
+            LIMIT 8
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        rows = []
+    running_by_agent = {str(row["agent_role"] or "?"): int(row["n"] or 0) for row in rows}
+    if running_by_agent:
+        details["running_by_agent"] = running_by_agent
+    return details
 
 
 def read_hyper_controls(conn: sqlite3.Connection) -> dict:
@@ -310,6 +364,7 @@ def latest_aether_productivity_snapshot(
         "critic_approved": 0,
         "critic_rejected": 0,
         "tasks": {},
+        "task_runtime": {},
         "hyper": {},
     }
     with sqlite3.connect(str(db_file), timeout=10.0) as conn:
@@ -349,6 +404,7 @@ def latest_aether_productivity_snapshot(
             elif event_type == "critic_rejected":
                 snapshot["critic_rejected"] += 1
         snapshot["tasks"] = task_status_counts(conn, cutoff)
+        snapshot["task_runtime"] = task_runtime_details(conn, now)
         snapshot["hyper"] = read_hyper_controls(conn)
     return snapshot
 
@@ -399,7 +455,15 @@ def show_aether_productivity() -> None:
     print(f"  critic: approved={approved} rejected={rejected} reject_rate={reject_rate:.1f}%")
     tasks = snapshot.get("tasks") or {}
     task_parts = [f"{key}={tasks[key]}" for key in sorted(tasks)]
-    print(f"  tasks: {' '.join(task_parts) if task_parts else '-'}")
+    runtime = snapshot.get("task_runtime") or {}
+    extras: list[str] = []
+    if runtime.get("oldest_running_age_min") is not None:
+        extras.append(f"oldest_running={format_age_minutes(runtime.get('oldest_running_age_min'))}")
+    print(f"  tasks: {' '.join(task_parts) if task_parts else '-'} {' '.join(extras)}".rstrip())
+    running_by_agent = runtime.get("running_by_agent") if isinstance(runtime.get("running_by_agent"), dict) else {}
+    if running_by_agent:
+        top_agents = sorted(running_by_agent.items(), key=lambda item: (-int(item[1]), str(item[0])))[:6]
+        print("  tasks por agente: " + " ".join(f"{agent}={count}" for agent, count in top_agents))
     hyper = snapshot.get("hyper") or {}
     if hyper:
         print(

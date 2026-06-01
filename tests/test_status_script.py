@@ -44,7 +44,7 @@ def _make_productivity_db(path: Path) -> None:
     with sqlite3.connect(path) as conn:
         conn.execute("CREATE TABLE events (ts TEXT, type TEXT, payload_json TEXT)")
         conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT)")
-        conn.execute("CREATE TABLE tasks (status TEXT, updated_at TEXT)")
+        conn.execute("CREATE TABLE tasks (status TEXT, updated_at TEXT, agent_role TEXT)")
         conn.executemany(
             "INSERT INTO events VALUES (?, ?, ?)",
             [
@@ -69,12 +69,13 @@ def _make_productivity_db(path: Path) -> None:
             ],
         )
         conn.executemany(
-            "INSERT INTO tasks VALUES (?, ?)",
+            "INSERT INTO tasks VALUES (?, ?, ?)",
             [
-                ("running", "2026-06-01T17:55:00Z"),
-                ("queued", "2026-06-01T17:56:00Z"),
-                ("completed", "2026-06-01T17:57:00Z"),
-                ("completed", "2026-06-01T16:00:00Z"),
+                ("running", "2026-06-01T17:55:00Z", "agent_1m"),
+                ("running", "2026-06-01T17:58:00Z", "agent_5m"),
+                ("queued", "2026-06-01T17:56:00Z", "agent_1h"),
+                ("completed", "2026-06-01T17:57:00Z", "agent_1h"),
+                ("completed", "2026-06-01T16:00:00Z", "agent_1h"),
             ],
         )
         conn.execute(
@@ -114,7 +115,9 @@ def test_aether_productivity_snapshot_summarizes_recent_agent_work(tmp_path):
     assert snapshot["llm_created"] == 1
     assert snapshot["critic_approved"] == 1
     assert snapshot["critic_rejected"] == 1
-    assert snapshot["tasks"] == {"queued": 1, "running": 1, "recent_completed": 1}
+    assert snapshot["tasks"] == {"queued": 1, "running": 2, "recent_completed": 1}
+    assert snapshot["task_runtime"]["oldest_running_age_min"] == 5.0
+    assert snapshot["task_runtime"]["running_by_agent"] == {"agent_1m": 1, "agent_5m": 1}
     assert snapshot["hyper"]["verdict"] == "stuck"
 
 
@@ -134,7 +137,8 @@ def test_show_aether_productivity_prints_hyper_and_task_health(tmp_path, monkeyp
     assert "PRODUTIVIDADE AETHER" in out
     assert "pesquisa: ciclos=1 llm_nodes=7 web_nodes=14" in out
     assert "critic: approved=1 rejected=1 reject_rate=50.0%" in out
-    assert "tasks: queued=1 recent_completed=1 running=1" in out
+    assert "tasks: queued=1 recent_completed=1 running=2 oldest_running=" in out
+    assert "tasks por agente: agent_1m=1 agent_5m=1" in out
     assert "hyper: verdict=stuck every=2" in out
 
 
