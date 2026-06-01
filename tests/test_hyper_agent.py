@@ -131,6 +131,46 @@ def test_hyper_agent_assess_reports_best_age(tmp_path):
     assert assessment["best_age_min"] > 1
 
 
+def test_hyper_agent_assess_respects_ranking_reset(tmp_path):
+    from src.research.aether import hyper_agent
+
+    db = init_db(tmp_path / "aether.sqlite3")
+    reset_at = "2026-05-18T20:14:03Z"
+    with connect(db) as conn:
+        _add_validated(conn, "old-hidden-best", score=0.99, engine="rsi")
+        conn.execute(
+            """
+            UPDATE nodes
+            SET updated_at='2026-05-11T20:44:34Z',
+                created_at='2026-05-11T20:41:29Z'
+            WHERE id='old-hidden-best'
+            """
+        )
+        for idx in range(6):
+            _add_validated(conn, f"new-visible-{idx}", score=0.60 + idx / 100, engine="donchian")
+            conn.execute(
+                """
+                UPDATE nodes
+                SET updated_at='2026-05-27T07:31:11Z',
+                    created_at='2026-05-27T07:23:38Z'
+                WHERE id=?
+                """,
+                (f"new-visible-{idx}",),
+            )
+        set_setting(
+            conn,
+            f"ranking_hidden_node_ids:{CURRENT_CAMPAIGN_ID}",
+            {"reset_at": reset_at, "hidden_node_ids": ["old-hidden-best"]},
+        )
+
+        assessment = hyper_agent.assess(conn)
+
+    assert assessment["ranking_reset_after"] == reset_at
+    assert assessment["active_count"] == 6
+    assert assessment["best_age_min"] is not None
+    assert assessment["best_age_min"] < 20000
+
+
 def test_hyper_agent_expands_focus_budget_when_stuck_and_completion_is_high():
     from src.research.aether import hyper_agent
 

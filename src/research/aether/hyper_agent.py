@@ -42,6 +42,7 @@ from typing import Any
 from src.research.aether import tree_focus
 from src.research.aether.campaigns import get_active_campaign_id
 from src.research.aether.config import TIMEFRAMES, db_path, sqlite_busy_retry_seconds, sqlite_busy_timeout_ms
+from src.research.aether.db import get_setting
 from src.research.aether.repository import set_agent_status
 
 DB_PATH = db_path()
@@ -146,13 +147,42 @@ def _minutes_since(value: str | None) -> float | None:
     return (datetime.now(timezone.utc).timestamp() - ts) / 60.0
 
 
+def _env_truthy(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "sim", "on"}
+
+
+def _ranking_reset_after(conn: sqlite3.Connection, campaign_id: str) -> str | None:
+    if not _env_truthy("AETHER_HYPER_RESPECT_RANKING_RESET", True):
+        return None
+    try:
+        state = get_setting(conn, f"ranking_hidden_node_ids:{campaign_id}", default={})
+    except Exception:
+        return None
+    if isinstance(state, dict) and state.get("reset_at"):
+        return str(state["reset_at"])
+    return None
+
+
 def assess(conn: sqlite3.Connection) -> dict[str, Any]:
+    campaign_id = get_active_campaign_id(conn)
+    reset_after = _ranking_reset_after(conn, campaign_id)
+    reset_clause = "AND created_at > ?" if reset_after else ""
+    params: list[Any] = [campaign_id]
+    if reset_after:
+        params.append(reset_after)
     rows = conn.execute(
-        """
+        f"""
         SELECT id, status, score, metrics_json, tags_json, updated_at, created_at
         FROM nodes
-        WHERE id != 'root' AND id NOT LIKE 'tf:%'
-        """
+        WHERE campaign_id=?
+          AND id != 'root'
+          AND id NOT LIKE 'tf:%'
+          {reset_clause}
+        """,
+        params,
     ).fetchall()
     family_active: dict[str, int] = {}
     best_score = -math.inf
@@ -203,7 +233,6 @@ def assess(conn: sqlite3.Connection) -> dict[str, Any]:
     running_tasks = 0
     queued_tasks = 0
     try:
-        campaign_id = get_active_campaign_id(conn)
         focus_state = tree_focus.assess(conn, campaign_id)
         task_rows = conn.execute(
             """
@@ -235,6 +264,7 @@ def assess(conn: sqlite3.Connection) -> dict[str, Any]:
         "focus_completion_ratio": float(focus_state.get("completion_ratio") or 0.0),
         "running_tasks": running_tasks,
         "queued_tasks": queued_tasks,
+        "ranking_reset_after": reset_after,
     }
 
 
@@ -284,6 +314,7 @@ def decide(assessment: dict[str, Any], previous: dict[str, Any] | None) -> dict[
         "focus_completion_ratio": assessment.get("focus_completion_ratio"),
         "running_tasks": assessment.get("running_tasks"),
         "queued_tasks": assessment.get("queued_tasks"),
+        "ranking_reset_after": assessment.get("ranking_reset_after"),
         "updated_at": _now(),
     }
     focus_budget = _focus_budget_for(assessment)
@@ -335,6 +366,7 @@ def _changed(previous: dict[str, Any] | None, controls: dict[str, Any]) -> bool:
         "focus_completion_ratio",
         "running_tasks",
         "queued_tasks",
+        "ranking_reset_after",
     )
     return any(previous.get(key) != controls.get(key) for key in keys)
 
@@ -406,6 +438,7 @@ def run_once(conn: sqlite3.Connection, log: logging.Logger) -> dict[str, Any]:
                 "focus_completion_ratio": controls.get("focus_completion_ratio"),
                 "running_tasks": controls.get("running_tasks"),
                 "queued_tasks": controls.get("queued_tasks"),
+                "ranking_reset_after": controls.get("ranking_reset_after"),
                 "bubble": "Meta-controle ativo.",
             },
         )

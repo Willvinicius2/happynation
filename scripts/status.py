@@ -404,7 +404,7 @@ def show_aether_productivity() -> None:
     if hyper:
         print(
             "  hyper: verdict={verdict} every={every} age={age} reject={reject} "
-            "focus={focus_open}/{focus_budget} tasks={running}/{queued} last_seen={last_seen}".format(
+            "focus={focus_open}/{focus_budget} tasks={running}/{queued} reset_after={reset_after} last_seen={last_seen}".format(
                 verdict=hyper.get("verdict", "-"),
                 every=hyper.get("force_exploration_every", "-"),
                 age=format_age_minutes(hyper.get("best_age_min")),
@@ -413,6 +413,7 @@ def show_aether_productivity() -> None:
                 focus_budget=hyper.get("focus_open_budget", "-"),
                 running=hyper.get("running_tasks", "-"),
                 queued=hyper.get("queued_tasks", "-"),
+                reset_after=hyper.get("ranking_reset_after") or "-",
                 last_seen=hyper.get("last_seen_at") or hyper.get("updated_at") or "-",
             )
         )
