@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from src.research.aether.campaign_constants import CURRENT_CAMPAIGN_ID
 from src.research.aether.db import connect, init_db, set_setting
@@ -81,6 +82,34 @@ def test_hyper_agent_updates_controls_without_dropping_extra_fields(tmp_path):
     assert event_type == "hyper_controls_updated"
 
 
+def test_hyper_agent_writes_controls_when_event_insert_is_locked(tmp_path, monkeypatch):
+    from src.research.aether import hyper_agent
+
+    db = init_db(tmp_path / "aether.sqlite3")
+    with connect(db) as conn:
+        set_setting(
+            conn,
+            "hyper_controls",
+            {
+                "force_exploration_every": 6,
+                "verdict": "exploring",
+                "last_event_at": "2026-01-01T00:00:00Z",
+            },
+        )
+
+        def locked_event(*_args, **_kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(hyper_agent, "_emit_event", locked_event)
+        controls = hyper_agent.run_once(conn, hyper_agent._setup_logger())
+        stored = json.loads(conn.execute("SELECT value_json FROM settings WHERE key='hyper_controls'").fetchone()[0])
+
+    assert controls["force_exploration_every"] == 4
+    assert stored["force_exploration_every"] == 4
+    assert stored["last_seen_at"]
+    assert stored["last_event_at"] == "2026-01-01T00:00:00Z"
+
+
 def test_hyper_agent_assess_reports_best_age(tmp_path):
     from src.research.aether import hyper_agent
 
@@ -124,6 +153,30 @@ def test_hyper_agent_expands_focus_budget_when_stuck_and_completion_is_high():
 
     assert controls["focus_open_budget"] >= 24
     assert controls["focus_open_budget"] > controls["focus_open_count"]
+
+
+def test_hyper_agent_scales_focus_budget_for_productive_stuck_backlog():
+    from src.research.aether import hyper_agent
+
+    controls = hyper_agent.decide(
+        {
+            "verdict": "stuck",
+            "diversity": 0.97,
+            "dominance_pct": 9.0,
+            "best_age_min": 30000.0,
+            "critic_reject_rate": 0.07,
+            "active_count": 500,
+            "focus_open_count": 66,
+            "focus_actionable_total": 283,
+            "focus_completion_ratio": 0.76,
+            "running_tasks": 36,
+            "queued_tasks": 0,
+        },
+        None,
+    )
+
+    assert controls["focus_open_budget"] > controls["focus_open_count"]
+    assert controls["focus_open_budget"] <= hyper_agent.FOCUS_BUDGET_MAX
 
 
 def test_hyper_agent_keeps_focus_budget_conservative_when_quality_drops():

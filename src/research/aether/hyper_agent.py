@@ -59,7 +59,7 @@ HEARTBEAT_EVENT_MINUTES = max(1, int(os.getenv("AETHER_HYPER_HEARTBEAT_EVENT_MIN
 FOCUS_BUDGET_MIN = max(6, int(os.getenv("AETHER_HYPER_FOCUS_BUDGET_MIN", str(max(12, len(TIMEFRAMES) * 2)))))
 FOCUS_BUDGET_NORMAL = max(FOCUS_BUDGET_MIN, int(os.getenv("AETHER_HYPER_FOCUS_BUDGET_NORMAL", str(max(18, len(TIMEFRAMES) * 3)))))
 FOCUS_BUDGET_STUCK = max(FOCUS_BUDGET_NORMAL, int(os.getenv("AETHER_HYPER_FOCUS_BUDGET_STUCK", str(max(24, len(TIMEFRAMES) * 4)))))
-FOCUS_BUDGET_MAX = max(FOCUS_BUDGET_STUCK, int(os.getenv("AETHER_HYPER_FOCUS_BUDGET_MAX", str(max(36, len(TIMEFRAMES) * 6)))))
+FOCUS_BUDGET_MAX = max(FOCUS_BUDGET_STUCK, int(os.getenv("AETHER_HYPER_FOCUS_BUDGET_MAX", str(max(72, len(TIMEFRAMES) * 12)))))
 
 VERDICT_TO_EVERY = {
     "stuck": 2,
@@ -244,8 +244,12 @@ def _focus_budget_for(assessment: dict[str, Any]) -> int | None:
         return None
     completion = float(assessment.get("focus_completion_ratio") or 0.0)
     reject_rate = float(assessment.get("critic_reject_rate") or 0.0)
+    running_tasks = int(assessment.get("running_tasks") or 0)
     if completion < 0.55 or reject_rate >= 0.60:
         return FOCUS_BUDGET_MIN
+    if assessment.get("verdict") == "stuck" and completion >= 0.70 and reject_rate <= 0.25:
+        productive_budget = max(FOCUS_BUDGET_STUCK, running_tasks * 2)
+        return min(FOCUS_BUDGET_MAX, productive_budget)
     if assessment.get("verdict") == "stuck" and completion >= 0.80:
         return min(FOCUS_BUDGET_MAX, FOCUS_BUDGET_STUCK)
     if assessment.get("verdict") in {"converging", "balanced"} and completion >= 0.70:
@@ -372,10 +376,17 @@ def run_once(conn: sqlite3.Connection, log: logging.Logger) -> dict[str, Any]:
         event_type = "hyper_controls_updated"
     elif heartbeat_due:
         event_type = "hyper_controls_heartbeat"
-    if event_type:
-        controls["last_event_at"] = controls["last_seen_at"]
-        _emit_event(conn, event_type, controls)
     write_controls(conn, controls)
+    if event_type:
+        event_controls = dict(controls)
+        event_controls["last_event_at"] = event_controls["last_seen_at"]
+        try:
+            _emit_event(conn, event_type, event_controls)
+        except sqlite3.OperationalError as exc:
+            log.warning(f"event skipped: {exc}")
+        else:
+            controls = event_controls
+            write_controls(conn, controls)
     try:
         set_agent_status(
             conn,
