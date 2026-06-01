@@ -390,6 +390,12 @@ def create_web_hypothesis_batch(conn, *, max_new: int = 1) -> dict[str, Any]:
         agent_role="hypothesis_generator",
         message="Busca web iniciada para novas hipoteses.",
     )
+    # A coleta web pode levar varios segundos. Comitar o evento antes evita
+    # segurar write-lock SQLite enquanto chamadas HTTP externas estao em voo.
+    try:
+        conn.commit()
+    except Exception:
+        pass
     sources = collect_web_sources(max_queries=3, per_query=4)
     specs = strategy_specs_from_sources(sources, max_specs=max_new * 2)
     created = 0

@@ -204,6 +204,24 @@ def test_web_research_reopens_source_after_ranking_reset(tmp_path, monkeypatch):
     assert any(":r:" in node_id for node_id in parent_ids)
 
 
+def test_web_research_commits_before_external_collection(tmp_path, monkeypatch):
+    from src.research.aether import web_research
+
+    db = init_db(tmp_path / "aether.sqlite3")
+    observed = {"in_transaction": None}
+
+    with connect(db) as conn:
+        def collect_without_lock(**_kwargs):
+            observed["in_transaction"] = conn.in_transaction
+            return []
+
+        monkeypatch.setattr(web_research, "collect_web_sources", collect_without_lock)
+        result = web_research.create_web_hypothesis_batch(conn, max_new=1)
+
+    assert observed["in_transaction"] is False
+    assert result["created_hypotheses"] == 0
+
+
 def test_web_research_maps_microstructure_sources_to_proxy_specs():
     from src.research.aether.web_research import strategy_specs_from_sources
 
