@@ -14,9 +14,11 @@ import json
 import hashlib
 import logging
 import os
+import re
 import sqlite3
 import sys
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -237,33 +239,37 @@ def _as_int(value, default: int = 0) -> int:
         return default
 
 
-def _passes_deploy_gates(metrics: dict, score: float) -> bool:
+def _deploy_gate_block_reason(metrics: dict, score: float) -> str:
     if _as_float(_pick_metric(metrics, "pnl_pct", "oos_pnl_pct", "return_pct")) < MIN_PNL_PCT:
-        return False
+        return "pnl_below_min"
     if _as_int(_pick_metric(metrics, "trade_count", "trades", "oos_trades")) < MIN_TRADES:
-        return False
+        return "trades_below_min"
     if score < MIN_SCORE:
-        return False
+        return "score_below_min"
     if MAX_MDD_PCT > 0 and _as_float(_pick_metric(metrics, "mdd_pct", "oos_mdd_pct")) > MAX_MDD_PCT:
-        return False
+        return "mdd_above_max"
     # Critic gate configuravel: 'approved' exige aprovacao explicita;
     # 'any' aceita pending/sem critic mas ainda bloqueia rejected.
     critic_status = metrics.get("critic_status")
     if critic_status == "rejected":
-        return False
+        return "critic_rejected"
     if CRITIC_GATE == "approved" and critic_status != "approved":
-        return False
-    return True
+        return "critic_not_approved"
+    return ""
 
 
-def _record_for(row: sqlite3.Row, metrics: dict) -> dict | None:
+def _passes_deploy_gates(metrics: dict, score: float) -> bool:
+    return _deploy_gate_block_reason(metrics, score) == ""
+
+
+def _record_for_with_reason(row: sqlite3.Row, metrics: dict) -> tuple[dict | None, str]:
     best = metrics.get("best_probe") or {}
     engine = best.get("engine")
     if not engine:
-        return None
+        return None, "missing_engine"
     params = best.get("params")
     if not isinstance(params, dict) or not params:
-        return None
+        return None, "missing_params"
     probe_specs = metrics.get("probe_specs") if isinstance(metrics.get("probe_specs"), list) else []
     clean_specs = [
         {"engine": str(spec.get("engine")), "params": dict(spec.get("params") or {})}
@@ -272,18 +278,18 @@ def _record_for(row: sqlite3.Row, metrics: dict) -> dict | None:
     ]
     if len(clean_specs) > 1:
         if REQUIRE_COMBO_FOR_MULTI and str(engine) != "combo":
-            return None
+            return None, "multi_probe_requires_combo"
         if str(engine) == "combo":
             params = {**params, "mode": params.get("mode") or "consensus", "specs": params.get("specs") or clean_specs}
     symbol = (best.get("symbol") or "").upper()
     if not symbol:
-        return None
+        return None, "missing_symbol"
     if not _asset_allowed(symbol):
-        return None
+        return None, "asset_not_allowed"
     score = float(row["score"])
     timeframe = str(best.get("timeframe") or "")
     if not _timeframe_allowed(timeframe):
-        return None
+        return None, "timeframe_not_allowed"
     rec_id = _active_id(row["id"], str(engine), params, symbol, timeframe)
     return {
         "id": rec_id,
@@ -311,7 +317,12 @@ def _record_for(row: sqlite3.Row, metrics: dict) -> dict | None:
         },
         "source_node_id": row["id"],
         "source": "aether_auto_deploy",
-    }
+    }, ""
+
+
+def _record_for(row: sqlite3.Row, metrics: dict) -> dict | None:
+    rec, _reason = _record_for_with_reason(row, metrics)
+    return rec
 
 
 def _asset_allowed(symbol: str) -> bool:
@@ -477,25 +488,65 @@ def _hypothesis_base_name(rec: dict) -> str:
 MAX_PER_HYPOTHESIS_ASSET = _env_int("AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET", 0)
 
 
+def _format_reason_counts(counts: Counter[str], limit: int = 8) -> str:
+    if not counts:
+        return ""
+    parts = [f"{key}:{value}" for key, value in counts.most_common(limit)]
+    extra = sum(counts.values()) - sum(value for _key, value in counts.most_common(limit))
+    if extra > 0:
+        parts.append(f"other:{extra}")
+    return ",".join(parts)
+
+
+def _reason_bucket(reason: str) -> str:
+    text = str(reason or "blocked").strip().lower()
+    if text.startswith("manifest top validation rejected:"):
+        detail = text.split(":", 1)[1]
+        if "cross-symbol" in detail:
+            return "manifest_top_validation_cross_symbol"
+        if "trade sample" in detail:
+            return "manifest_top_validation_trade_sample"
+        if "walk-forward" in detail:
+            return "manifest_top_validation_walk_forward"
+        return "manifest_top_validation_rejected"
+    if text.startswith("heavy validation"):
+        if "cut_or_revalidate" in text:
+            return "heavy_validation_cut_or_revalidate"
+        if "cut_or_pause" in text:
+            return "heavy_validation_cut_or_pause"
+        return "heavy_validation"
+    key = re.sub(r"[^a-z0-9_]+", "_", text).strip("_")
+    return key[:80] or "blocked"
+
+
 def _select_deploy_records(
     ranked: list[tuple[float, dict]],
     reserved_records: list[dict] | None = None,
+    cap_reasons: Counter[str] | None = None,
 ) -> list[tuple[float, dict]]:
     selected: list[tuple[float, dict]] = []
     family_counts, asset_counts, asset_family_tf_counts, hyp_asset_counts = _seed_cap_counts(reserved_records or [])
-    for score, rec in ranked:
+    for idx, (score, rec) in enumerate(ranked):
         family = _family_for(rec)
         asset = _asset_for(rec)
         asset_family_tf = _asset_family_tf_key(rec)
         hyp_key = (_hypothesis_base_name(rec), asset)
         if MAX_PER_FAMILY > 0 and family_counts.get(family, 0) >= MAX_PER_FAMILY:
+            if cap_reasons is not None:
+                cap_reasons["family_cap"] += 1
             continue
         if MAX_PER_ASSET > 0 and asset_counts.get(asset, 0) >= MAX_PER_ASSET:
+            if cap_reasons is not None:
+                cap_reasons["asset_cap"] += 1
             continue
         if MAX_PER_ASSET_FAMILY_TF > 0 and asset_family_tf_counts.get(asset_family_tf, 0) >= MAX_PER_ASSET_FAMILY_TF:
+            if cap_reasons is not None:
+                cap_reasons["asset_family_timeframe_cap"] += 1
             continue
         # Cap de variacoes da mesma hipotese-base no mesmo ativo.
         if MAX_PER_HYPOTHESIS_ASSET > 0 and hyp_asset_counts.get(hyp_key, 0) >= MAX_PER_HYPOTHESIS_ASSET:
+            if cap_reasons is not None:
+                cap_reasons["hypothesis_asset_cap"] += 1
             continue
         selected.append((score, rec))
         family_counts[family] = family_counts.get(family, 0) + 1
@@ -503,6 +554,8 @@ def _select_deploy_records(
         asset_family_tf_counts[asset_family_tf] = asset_family_tf_counts.get(asset_family_tf, 0) + 1
         hyp_asset_counts[hyp_key] = hyp_asset_counts.get(hyp_key, 0) + 1
         if len(selected) >= DEPLOY_TOP_N:
+            if cap_reasons is not None:
+                cap_reasons["top_n_cap"] += max(0, len(ranked) - idx - 1)
             break
     return selected
 
@@ -512,14 +565,23 @@ def run_once(log: logging.Logger) -> dict:
     with _connect() as conn:
         nodes = _validated_nodes(conn)
     candidates: list[tuple[float, dict]] = []
+    gate_reasons: Counter[str] = Counter()
+    record_reasons: Counter[str] = Counter()
+    blocklist_reasons: Counter[str] = Counter()
+    cap_reasons: Counter[str] = Counter()
     blocked = 0
     for row, metrics in nodes:
-        if not _passes_deploy_gates(metrics, float(row["score"])):
+        gate_reason = _deploy_gate_block_reason(metrics, float(row["score"]))
+        if gate_reason:
+            gate_reasons[gate_reason] += 1
             continue
-        rec = _record_for(row, metrics)
+        rec, record_reason = _record_for_with_reason(row, metrics)
         if rec is None:
+            record_reasons[record_reason or "record_unavailable"] += 1
             continue
-        if _block_reason(blocklist, str(rec.get("id") or ""), str(row["id"] or "")):
+        block_reason = _block_reason(blocklist, str(rec.get("id") or ""), str(row["id"] or ""))
+        if block_reason:
+            blocklist_reasons[_reason_bucket(block_reason)] += 1
             blocked += 1
             continue
         base_score = float(row["score"])
@@ -550,7 +612,7 @@ def run_once(log: logging.Logger) -> dict:
         rec for rec in active_records
         if RESPECT_UNMANAGED_CAPS and not _is_managed_record(rec)
     ]
-    deduped = _select_deploy_records(ranked, reserved_records=reserved_records)
+    deduped = _select_deploy_records(ranked, reserved_records=reserved_records, cap_reasons=cap_reasons)
 
     # Identifica o que precisa sair: ids do manifest atual nao mais elegiveis.
     current_records = {
@@ -584,7 +646,25 @@ def run_once(log: logging.Logger) -> dict:
         f"deployed={deployed} skipped_unchanged={skipped_unchanged} "
         f"removed_stale={removed} blocked={blocked}"
     )
-    return {"deployed": deployed, "removed": removed, "candidates": len(candidates), "blocked": blocked}
+    details = {
+        "gate": _format_reason_counts(gate_reasons),
+        "record": _format_reason_counts(record_reasons),
+        "blocklist": _format_reason_counts(blocklist_reasons),
+        "caps": _format_reason_counts(cap_reasons),
+    }
+    detail_msg = " ".join(f"{name}={value}" for name, value in details.items() if value)
+    if detail_msg:
+        log.info("deploy detail: %s", detail_msg)
+    return {
+        "deployed": deployed,
+        "removed": removed,
+        "candidates": len(candidates),
+        "blocked": blocked,
+        "gate_reasons": dict(gate_reasons),
+        "record_reasons": dict(record_reasons),
+        "blocklist_reasons": dict(blocklist_reasons),
+        "cap_reasons": dict(cap_reasons),
+    }
 
 
 def main() -> int:

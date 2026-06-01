@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import logging
+import sqlite3
 import sys
+from collections import Counter
 
 from fastapi.testclient import TestClient
 
@@ -48,6 +51,14 @@ def _node(conn, node_id: str, *, status: str, metrics: dict, score: float = 0.7)
         priority=score,
         metrics=metrics,
     )
+
+
+def _auto_deploy_row(node_id: str, *, score: float = 0.7) -> sqlite3.Row:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE rows (id TEXT, name TEXT, score REAL)")
+    conn.execute("INSERT INTO rows VALUES (?, ?, ?)", (node_id, node_id, score))
+    return conn.execute("SELECT id, name, score FROM rows").fetchone()
 
 
 def test_ranking_only_returns_deep_validated_nodes(tmp_path):
@@ -107,11 +118,35 @@ def test_ranking_deploy_blocker_reflects_auto_deploy_gates(monkeypatch):
 
 
 def test_auto_deploy_defaults_to_critic_and_trade_gates():
-    from src.research.aether.auto_deploy import _passes_deploy_gates
+    from src.research.aether.auto_deploy import _deploy_gate_block_reason, _passes_deploy_gates
 
     assert _passes_deploy_gates(_metrics(), 0.7) is True
     assert _passes_deploy_gates(_metrics(critic_status=None), 0.7) is False
     assert _passes_deploy_gates(_metrics(trade_count=11), 0.7) is False
+    assert _deploy_gate_block_reason(_metrics(critic_status=None), 0.7) == "critic_not_approved"
+    assert _deploy_gate_block_reason(_metrics(trade_count=11), 0.7) == "trades_below_min"
+
+
+def test_auto_deploy_record_reasons_explain_skipped_candidates(monkeypatch):
+    import src.research.aether.auto_deploy as auto_deploy
+
+    monkeypatch.setattr(auto_deploy, "ALLOWED_ASSETS", {"BTCUSDT"})
+    monkeypatch.setattr(auto_deploy, "ALLOWED_TIMEFRAMES", {"1H", "15M"})
+    row = _auto_deploy_row("candidate")
+
+    rec, reason = auto_deploy._record_for_with_reason(
+        row,
+        _metrics(best_probe={"engine": "rsi", "params": {"low": 25}, "symbol": "LINKUSDT", "timeframe": "1h"}),
+    )
+    assert rec is None
+    assert reason == "asset_not_allowed"
+
+    rec, reason = auto_deploy._record_for_with_reason(
+        row,
+        _metrics(best_probe={"engine": "rsi", "params": {"low": 25}, "symbol": "BTCUSDT", "timeframe": "4h"}),
+    )
+    assert rec is None
+    assert reason == "timeframe_not_allowed"
 
 
 def test_auto_deploy_caps_same_asset_family_timeframe(monkeypatch):
@@ -125,9 +160,11 @@ def test_auto_deploy_caps_same_asset_family_timeframe(monkeypatch):
         (0.7, {"id": "other-tf", "engine": "bollinger", "asset": "LINKUSDT", "timeframe": "1h"}),
     ]
 
-    selected = auto_deploy._select_deploy_records(ranked)
+    cap_reasons: Counter[str] = Counter()
+    selected = auto_deploy._select_deploy_records(ranked, cap_reasons=cap_reasons)
 
     assert [rec["id"] for _score, rec in selected] == ["best", "other-tf"]
+    assert cap_reasons["asset_family_timeframe_cap"] == 1
 
 
 def test_auto_deploy_reserves_manual_caps_and_manages_aether_sources(monkeypatch):
@@ -151,6 +188,61 @@ def test_auto_deploy_reserves_manual_caps_and_manages_aether_sources(monkeypatch
     assert auto_deploy._is_managed_record({"source": "aether_happynation"}) is True
     assert auto_deploy._is_managed_record({"source": "aether_manual_ranking_deploy"}) is True
     assert auto_deploy._is_managed_record({"source": "manual"}) is False
+
+
+def test_auto_deploy_run_once_returns_reason_counters(monkeypatch):
+    import src.research.aether.auto_deploy as auto_deploy
+
+    assert (
+        auto_deploy._reason_bucket("manifest top validation rejected: cross-symbol falhou (0/3 alts)")
+        == "manifest_top_validation_cross_symbol"
+    )
+    assert auto_deploy._reason_bucket("heavy validation CUT_OR_REVALIDATE: gates 1/3") == "heavy_validation_cut_or_revalidate"
+
+    class Log:
+        def __init__(self):
+            self.lines: list[str] = []
+
+        def info(self, msg, *args):
+            self.lines.append(str(msg) % args if args else str(msg))
+
+    monkeypatch.setattr(auto_deploy, "_connect", lambda: contextlib.nullcontext(None))
+    monkeypatch.setattr(auto_deploy, "ALLOWED_ASSETS", {"BTCUSDT"})
+    monkeypatch.setattr(auto_deploy, "ALLOWED_TIMEFRAMES", {"1H", "15M"})
+    monkeypatch.setattr(auto_deploy, "MAX_PER_FAMILY", 30)
+    monkeypatch.setattr(auto_deploy, "MAX_PER_ASSET", 30)
+    monkeypatch.setattr(auto_deploy, "MAX_PER_ASSET_FAMILY_TF", 30)
+    monkeypatch.setattr(auto_deploy, "MAX_PER_HYPOTHESIS_ASSET", 0)
+    monkeypatch.setattr(auto_deploy, "DEPLOY_TOP_N", 250)
+    monkeypatch.setattr(auto_deploy, "list_active", lambda: [])
+    monkeypatch.setattr(auto_deploy, "remove", lambda _active_id: False)
+
+    deployed: list[dict] = []
+    monkeypatch.setattr(auto_deploy, "deploy_record", lambda rec, **_kwargs: deployed.append(rec) or rec)
+    monkeypatch.setattr(
+        auto_deploy,
+        "_load_blocklist",
+        lambda: {"active_ids": {}, "source_node_ids": {"blocked-node": {"reason": "manual_review"}}},
+    )
+    nodes = [
+        (_auto_deploy_row("low-trades"), _metrics(trade_count=1)),
+        (
+            _auto_deploy_row("bad-asset"),
+            _metrics(best_probe={"engine": "rsi", "params": {"low": 25}, "symbol": "LINKUSDT", "timeframe": "1h"}),
+        ),
+        (_auto_deploy_row("blocked-node"), _metrics()),
+        (_auto_deploy_row("deployable"), _metrics()),
+    ]
+    monkeypatch.setattr(auto_deploy, "_validated_nodes", lambda _conn: nodes)
+
+    log = Log()
+    result = auto_deploy.run_once(log)
+
+    assert len(deployed) == 1
+    assert result["gate_reasons"] == {"trades_below_min": 1}
+    assert result["record_reasons"] == {"asset_not_allowed": 1}
+    assert result["blocklist_reasons"] == {"manual_review": 1}
+    assert any("deploy detail:" in line for line in log.lines)
 
 
 def test_auto_deploy_rank_score_prefers_more_trades_and_fast_tf(monkeypatch):
