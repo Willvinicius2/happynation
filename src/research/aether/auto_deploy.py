@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.research.aether.config import db_path
+from src.research.aether.config import db_path, sqlite_busy_timeout_ms
 from src.research.active import deploy_record, list_active, remove
 
 LOG_PATH = Path(__file__).resolve().parents[3] / "src" / "logs" / "aether" / "auto_deploy.log"
@@ -143,9 +143,10 @@ def _setup_logger() -> logging.Logger:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path()), timeout=30.0)
+    busy_timeout = sqlite_busy_timeout_ms()
+    conn = sqlite3.connect(str(db_path()), timeout=busy_timeout / 1000.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
     return conn
 
 

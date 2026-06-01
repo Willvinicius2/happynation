@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from .config import db_path
+from .config import db_path, sqlite_busy_timeout_ms
 from .campaign_constants import ACTIVE_CAMPAIGN_SETTING, CURRENT_CAMPAIGN_ID, DEFAULT_CAMPAIGNS, LEGACY_CAMPAIGN_ID, LEGACY_SOURCE_TYPES
 from .timeutils import now_iso
 
@@ -169,12 +169,13 @@ CREATE TABLE IF NOT EXISTS campaigns (
 def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
     p = path or db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(p, timeout=30, check_same_thread=False)
+    busy_timeout = sqlite_busy_timeout_ms()
+    conn = sqlite3.connect(p, timeout=busy_timeout / 1000.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     # Multiplos agentes (orchestrator/critic/hyper/llm) abrem a mesma DB.
     # busy_timeout em ms espera a writer lock antes de levantar SQLITE_BUSY.
-    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     try:

@@ -36,7 +36,7 @@ from src.research.aether.compute import (
 )
 from src.research.aether import compute as _compute_mod
 from src.research.aether import gpu_compute as _gpu_compute
-from src.research.aether.config import db_path
+from src.research.aether.config import db_path, sqlite_busy_timeout_ms
 
 DB_PATH = db_path()
 LOG_PATH = Path(__file__).resolve().parents[3] / "src" / "logs" / "aether" / "critic_agent.log"
@@ -160,10 +160,11 @@ def _setup_logger() -> logging.Logger:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH), timeout=30.0, isolation_level=None)
+    busy_timeout = sqlite_busy_timeout_ms()
+    conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout / 1000.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
     return conn
 
 

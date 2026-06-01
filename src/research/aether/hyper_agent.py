@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import sqlite3
 import sys
 import time
@@ -38,7 +39,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.research.aether.config import db_path
+from src.research.aether.config import db_path, sqlite_busy_timeout_ms
+from src.research.aether.repository import ensure_agents, set_agent_status
 
 DB_PATH = db_path()
 LOG_PATH = Path(__file__).resolve().parents[3] / "src" / "logs" / "aether" / "hyper_agent.log"
@@ -51,6 +53,7 @@ EVERY_MAX = 12
 # Mudancas bruscas no `every` causam comportamento on/off no orchestrator.
 # Limita a delta por ciclo para evitar oscilacao agressiva.
 MAX_DELTA_PER_CYCLE = 2
+HEARTBEAT_EVENT_MINUTES = max(1, int(os.getenv("AETHER_HYPER_HEARTBEAT_EVENT_MINUTES", "10")))
 
 VERDICT_TO_EVERY = {
     "stuck": 2,
@@ -81,10 +84,11 @@ def _setup_logger() -> logging.Logger:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH), timeout=30.0, isolation_level=None)
+    busy_timeout = sqlite_busy_timeout_ms()
+    conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout / 1000.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
     return conn
 
 
@@ -123,6 +127,13 @@ def _parse_ts(value: str | None) -> float | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     except Exception:
         return None
+
+
+def _minutes_since(value: str | None) -> float | None:
+    ts = _parse_ts(value)
+    if ts is None:
+        return None
+    return (datetime.now(timezone.utc).timestamp() - ts) / 60.0
 
 
 def assess(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -238,14 +249,28 @@ def read_controls(conn: sqlite3.Connection) -> dict[str, Any] | None:
         return None
 
 
-def run_once(conn: sqlite3.Connection, log: logging.Logger) -> dict[str, Any]:
-    assessment = assess(conn)
-    previous = read_controls(conn)
-    controls = decide(assessment, previous)
-    if previous and previous.get("force_exploration_every") == controls["force_exploration_every"] \
-            and previous.get("verdict") == controls["verdict"]:
-        return controls
-    write_controls(conn, controls)
+def _merge_controls(previous: dict[str, Any] | None, controls: dict[str, Any]) -> dict[str, Any]:
+    """Preserva knobs manuais que tambem vivem em hyper_controls."""
+    merged = dict(previous or {})
+    merged.update(controls)
+    return merged
+
+
+def _changed(previous: dict[str, Any] | None, controls: dict[str, Any]) -> bool:
+    if not previous:
+        return True
+    keys = (
+        "force_exploration_every",
+        "verdict",
+        "diversity",
+        "dominance_pct",
+        "best_age_min",
+        "critic_reject_rate",
+    )
+    return any(previous.get(key) != controls.get(key) for key in keys)
+
+
+def _emit_event(conn: sqlite3.Connection, event_type: str, controls: dict[str, Any]) -> None:
     conn.execute(
         """
         INSERT INTO events (campaign_id, ts, type, node_id, agent_role, message, payload_json)
@@ -254,20 +279,59 @@ def run_once(conn: sqlite3.Connection, log: logging.Logger) -> dict[str, Any]:
         (
             None,
             _now(),
-            "hyper_controls_updated",
+            event_type,
             None,
             "hyper_agent",
             (
-                f"Hyper ajustou ciclo de exploracao para a cada {controls['force_exploration_every']} "
-                f"(verdict={controls['verdict']}, div={controls['diversity']}, age={controls['best_age_min']}min)."
+                f"Hyper avaliou exploracao: every={controls['force_exploration_every']} "
+                f"verdict={controls['verdict']} div={controls['diversity']} "
+                f"age={controls['best_age_min']}min reject={controls['critic_reject_rate']}."
             ),
             json.dumps(controls, ensure_ascii=False),
         ),
     )
-    log.info(
-        f"controls -> every={controls['force_exploration_every']} verdict={controls['verdict']} "
-        f"div={controls['diversity']} age={controls['best_age_min']}min reject={controls['critic_reject_rate']}"
+
+
+def run_once(conn: sqlite3.Connection, log: logging.Logger) -> dict[str, Any]:
+    ensure_agents(conn)
+    assessment = assess(conn)
+    previous = read_controls(conn)
+    decided = decide(assessment, previous)
+    changed = _changed(previous, decided)
+    heartbeat_age = _minutes_since((previous or {}).get("last_event_at"))
+    heartbeat_due = heartbeat_age is None or heartbeat_age >= HEARTBEAT_EVENT_MINUTES
+    controls = _merge_controls(previous, decided)
+    controls["last_seen_at"] = _now()
+    event_type = None
+    if changed:
+        event_type = "hyper_controls_updated"
+    elif heartbeat_due:
+        event_type = "hyper_controls_heartbeat"
+    if event_type:
+        controls["last_event_at"] = controls["last_seen_at"]
+        _emit_event(conn, event_type, controls)
+    write_controls(conn, controls)
+    set_agent_status(
+        conn,
+        "hyper_agent",
+        "standby",
+        stats={
+            "sidecar_alive": True,
+            "last_seen_at": controls["last_seen_at"],
+            "force_exploration_every": controls["force_exploration_every"],
+            "verdict": controls["verdict"],
+            "diversity": controls["diversity"],
+            "dominance_pct": controls["dominance_pct"],
+            "best_age_min": controls["best_age_min"],
+            "critic_reject_rate": controls["critic_reject_rate"],
+            "bubble": "Meta-controle ativo.",
+        },
     )
+    if event_type:
+        log.info(
+            f"{event_type}: every={controls['force_exploration_every']} verdict={controls['verdict']} "
+            f"div={controls['diversity']} age={controls['best_age_min']}min reject={controls['critic_reject_rate']}"
+        )
     return controls
 
 

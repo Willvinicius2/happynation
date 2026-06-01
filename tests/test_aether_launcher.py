@@ -46,3 +46,16 @@ def test_aether_config_prefers_project_runtime_db(monkeypatch, tmp_path):
 
     assert config.runtime_dir() == project_runtime.resolve()
     assert config.db_path() == project_runtime.resolve() / "aether.sqlite3"
+
+
+def test_aether_config_sqlite_busy_timeout_is_configurable(monkeypatch):
+    import src.research.aether.config as config
+
+    monkeypatch.delenv("AETHER_SQLITE_BUSY_TIMEOUT_MS", raising=False)
+    assert config.sqlite_busy_timeout_ms() == 90000
+
+    monkeypatch.setenv("AETHER_SQLITE_BUSY_TIMEOUT_MS", "45000")
+    assert config.sqlite_busy_timeout_ms() == 45000
+
+    monkeypatch.setenv("AETHER_SQLITE_BUSY_TIMEOUT_MS", "bad")
+    assert config.sqlite_busy_timeout_ms() == 90000

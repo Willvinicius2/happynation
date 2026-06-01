@@ -44,6 +44,13 @@ def db_path() -> Path:
     return runtime_dir() / "aether.sqlite3"
 
 
+def sqlite_busy_timeout_ms() -> int:
+    try:
+        return max(30000, int(os.environ.get("AETHER_SQLITE_BUSY_TIMEOUT_MS", "90000")))
+    except (TypeError, ValueError):
+        return 90000
+
+
 def checkpoint_dir() -> Path:
     return runtime_dir() / "checkpoints"
 
