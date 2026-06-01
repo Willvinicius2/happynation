@@ -179,6 +179,19 @@ def test_hyper_agent_assess_respects_ranking_reset(tmp_path):
     assert assessment["best_age_min"] < 20000
 
 
+def test_hyper_agent_backs_off_repeated_sqlite_locks(monkeypatch):
+    from src.research.aether import hyper_agent
+
+    monkeypatch.setattr(hyper_agent, "BUSY_RETRY_SECONDS", 5.0)
+    monkeypatch.setattr(hyper_agent, "BUSY_RETRY_MAX_SECONDS", 30.0)
+
+    assert hyper_agent._busy_retry_sleep_seconds(1) == 5.0
+    assert hyper_agent._busy_retry_sleep_seconds(2) == 10.0
+    assert hyper_agent._busy_retry_sleep_seconds(3) == 20.0
+    assert hyper_agent._busy_retry_sleep_seconds(4) == 30.0
+    assert hyper_agent._busy_retry_sleep_seconds(10) == 30.0
+
+
 def test_hyper_agent_expands_focus_budget_when_stuck_and_completion_is_high():
     from src.research.aether import hyper_agent
 

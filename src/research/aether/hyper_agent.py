@@ -50,6 +50,7 @@ LOG_PATH = Path(__file__).resolve().parents[3] / "src" / "logs" / "aether" / "hy
 
 POLL_SECONDS = 120
 BUSY_RETRY_SECONDS = sqlite_busy_retry_seconds()
+BUSY_RETRY_MAX_SECONDS = max(BUSY_RETRY_SECONDS, min(float(POLL_SECONDS), BUSY_RETRY_SECONDS * 6))
 SETTING_KEY = "hyper_controls"
 DEFAULT_EVERY = 4
 EVERY_MIN = 2
@@ -145,6 +146,11 @@ def _minutes_since(value: str | None) -> float | None:
     if ts is None:
         return None
     return (datetime.now(timezone.utc).timestamp() - ts) / 60.0
+
+
+def _busy_retry_sleep_seconds(consecutive_busy: int) -> float:
+    consecutive = max(1, int(consecutive_busy or 1))
+    return min(BUSY_RETRY_MAX_SECONDS, BUSY_RETRY_SECONDS * (2 ** min(consecutive - 1, 4)))
 
 
 def _env_truthy(name: str, default: bool = False) -> bool:
@@ -459,15 +465,19 @@ def main() -> int:
     if not DB_PATH.exists():
         log.error(f"DB nao existe: {DB_PATH}")
         return 1
+    consecutive_busy = 0
     while True:
         sleep_for = POLL_SECONDS
         try:
             with _connect() as conn:
                 run_once(conn, log)
+            consecutive_busy = 0
         except sqlite3.OperationalError as e:
-            log.warning(f"sqlite busy/lock: {e}")
-            sleep_for = BUSY_RETRY_SECONDS
+            consecutive_busy += 1
+            sleep_for = _busy_retry_sleep_seconds(consecutive_busy)
+            log.warning(f"sqlite busy/lock #{consecutive_busy}: {e}; retry={sleep_for:.1f}s")
         except Exception as e:
+            consecutive_busy = 0
             log.exception(f"erro no ciclo: {e}")
         time.sleep(sleep_for)
 
