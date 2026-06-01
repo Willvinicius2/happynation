@@ -432,9 +432,23 @@ def run_probe(probe: dict[str, Any], legacy_root: str | None = None) -> dict[str
 
 def _write_checkpoint(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    data = json.dumps(payload, ensure_ascii=False, indent=2)
+    last_error: OSError | None = None
+    for attempt in range(6):
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_text(data, encoding="utf-8")
+            os.replace(tmp, path)
+            return
+        except OSError as exc:
+            last_error = exc
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            time.sleep(0.05 * (attempt + 1))
+    if last_error:
+        raise last_error
 
 
 def run_sweep(
@@ -478,7 +492,11 @@ def run_sweep(
         return progress
 
     def emit_progress(payload: dict[str, Any]) -> None:
-        _write_checkpoint(checkpoint, payload)
+        try:
+            _write_checkpoint(checkpoint, payload)
+        except OSError as exc:
+            # Checkpoint e dado de observabilidade/resume; nao pode derrubar o lote.
+            payload = {**payload, "checkpoint_error": f"{exc.__class__.__name__}: {exc}"[:300]}
         if progress_callback:
             progress_callback({k: v for k, v in payload.items() if k != "results"})
 
