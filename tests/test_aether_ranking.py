@@ -88,6 +88,24 @@ def test_ranking_requires_critic_approval_by_default(tmp_path):
     assert [row["node_id"] for row in rows] == ["critic-approved"]
 
 
+def test_ranking_deploy_blocker_reflects_auto_deploy_gates(monkeypatch):
+    import src.research.aether.ranking as ranking
+
+    monkeypatch.setattr(ranking, "_DEPLOY_MIN_SCORE", 0.5)
+    cap_state = {
+        "family": {},
+        "asset": {},
+        "aft": {},
+        "unmanaged_family": {},
+        "unmanaged_asset": {},
+        "unmanaged_aft": {},
+    }
+    item = {"score": 0.47, "pnl_pct": 20.0, "trade_count": 100, "mdd_pct": 10.0, "timeframe": "1h"}
+    metrics = {"critic_status": "approved", "best_probe": {"symbol": "BTCUSDT", "engine": "rsi", "timeframe": "1h"}}
+
+    assert ranking._deploy_blocker(item, metrics, cap_state).startswith("Gate deploy: score")
+
+
 def test_auto_deploy_defaults_to_critic_and_trade_gates():
     from src.research.aether.auto_deploy import _passes_deploy_gates
 
@@ -110,6 +128,47 @@ def test_auto_deploy_caps_same_asset_family_timeframe(monkeypatch):
     selected = auto_deploy._select_deploy_records(ranked)
 
     assert [rec["id"] for _score, rec in selected] == ["best", "other-tf"]
+
+
+def test_auto_deploy_reserves_manual_caps_and_manages_aether_sources(monkeypatch):
+    import src.research.aether.auto_deploy as auto_deploy
+
+    monkeypatch.setattr(auto_deploy, "MAX_PER_FAMILY", 10)
+    monkeypatch.setattr(auto_deploy, "MAX_PER_ASSET", 1)
+    monkeypatch.setattr(auto_deploy, "MAX_PER_ASSET_FAMILY_TF", 10)
+    monkeypatch.setattr(auto_deploy, "MAX_PER_HYPOTHESIS_ASSET", 0)
+    monkeypatch.setattr(auto_deploy, "MANAGED_SOURCE_PATTERNS", ["aether*"])
+
+    ranked = [
+        (0.9, {"id": "blocked-by-manual", "engine": "rsi", "asset": "BTCUSDT", "timeframe": "1h"}),
+        (0.8, {"id": "open-slot", "engine": "rsi", "asset": "ETHUSDT", "timeframe": "1h"}),
+    ]
+    reserved = [{"id": "manual", "source": "manual", "engine": "adx", "asset": "BTCUSDT", "timeframe": "1h"}]
+
+    selected = auto_deploy._select_deploy_records(ranked, reserved_records=reserved)
+
+    assert [rec["id"] for _score, rec in selected] == ["open-slot"]
+    assert auto_deploy._is_managed_record({"source": "aether_happynation"}) is True
+    assert auto_deploy._is_managed_record({"source": "aether_manual_ranking_deploy"}) is True
+    assert auto_deploy._is_managed_record({"source": "manual"}) is False
+
+
+def test_auto_deploy_rank_score_prefers_more_trades_and_fast_tf(monkeypatch):
+    import src.research.aether.auto_deploy as auto_deploy
+
+    monkeypatch.setattr(auto_deploy, "TRADE_COUNT_WEIGHT", 0.35)
+    monkeypatch.setattr(auto_deploy, "FAST_TF_BONUS", 0.08)
+
+    slow_sparse = {
+        "timeframe": "1d",
+        "summary": {"trade_count": 30, "pnl_pct": 80.0, "sharpe": 1.0, "mdd_pct": 15.0},
+    }
+    fast_active = {
+        "timeframe": "15m",
+        "summary": {"trade_count": 120, "pnl_pct": 80.0, "sharpe": 1.0, "mdd_pct": 15.0},
+    }
+
+    assert auto_deploy._deploy_rank_score(0.55, fast_active) > auto_deploy._deploy_rank_score(0.55, slow_sparse)
 
 
 def test_auto_deploy_defaults_to_bot_assets(monkeypatch):
@@ -324,6 +383,8 @@ def test_ranking_deploy_endpoint_only_deploys_paper_ready(tmp_path, monkeypatch)
 
     deployed = []
     monkeypatch.setattr(server_module, "deploy_record", lambda record: deployed.append(record) or record)
+    ready_metrics = _metrics()
+    ready_metrics["best_probe"] = {**ready_metrics["best_probe"], "timeframe": "1h"}
 
     with TestClient(app) as client:
         with runtime_connect() as conn:
@@ -349,7 +410,7 @@ def test_ranking_deploy_endpoint_only_deploys_paper_ready(tmp_path, monkeypatch)
                 status="validated",
                 score=0.8,
                 priority=0.8,
-                metrics=_metrics(),
+                metrics=ready_metrics,
             )
             runtime_upsert_node(
                 conn,
@@ -370,3 +431,59 @@ def test_ranking_deploy_endpoint_only_deploys_paper_ready(tmp_path, monkeypatch)
     body = response.json()
     assert body["deployed_count"] == 1
     assert [record["node_id"] for record in deployed] == ["ready"]
+
+
+def test_ranking_deploy_endpoint_respects_caps_unless_forced(tmp_path, monkeypatch):
+    monkeypatch.setenv("AETHER_RUNTIME_DIR", str(tmp_path))
+    for name in list(sys.modules):
+        if name.startswith("src.research.aether"):
+            del sys.modules[name]
+
+    from src.research.aether.db import connect as runtime_connect
+    from src.research.aether.repository import upsert_node as runtime_upsert_node
+    from src.research.aether.server import app
+    import src.research.aether.server as server_module
+
+    deployed = []
+    monkeypatch.setattr(server_module, "deploy_record", lambda record, **_: deployed.append(record) or record)
+
+    blocked_row = {
+        "node_id": "blocked",
+        "readiness": "paper_ready",
+        "score": 0.8,
+        "pnl_pct": 12.5,
+        "sharpe": 1.4,
+        "mdd_pct": 8.0,
+        "trade_count": 36,
+        "deploy_blocker": "Cap saturado: asset BTCUSDT ja tem 5 no bot",
+    }
+    monkeypatch.setattr(server_module, "build_strategy_ranking", lambda *_, **__: [blocked_row])
+
+    with TestClient(app) as client:
+        with runtime_connect() as conn:
+            runtime_upsert_node(
+                conn,
+                id="blocked",
+                campaign_id=CURRENT_CAMPAIGN_ID,
+                code="BLOCKED",
+                name="blocked",
+                hypothesis="So deve ir se force=true.",
+                status="validated",
+                score=0.8,
+                priority=0.8,
+                metrics=_metrics(),
+            )
+
+        response = client.post("/api/ranking/deploy?max_deploy=10")
+        forced = client.post("/api/ranking/deploy?max_deploy=10&force=true")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["deployed_count"] == 0
+    assert body["skipped_count"] == 1
+    assert "Cap saturado" in body["skipped"][0]["reason"]
+
+    assert forced.status_code == 200
+    assert forced.json()["deployed_count"] == 1
+    assert deployed[0]["source"] == "aether_manual_ranking_deploy"
+    assert deployed[0]["risk"]["stop_loss_pct"] == 2.0

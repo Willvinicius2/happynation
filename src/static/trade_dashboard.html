@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HAPPYNATIONBOT Trade Monitor</title>
+<link rel="stylesheet" href="/static/trade_dashboard.css?v=blue-20260522">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><div class="mark">HN</div><div><h1>Trade Monitor <span id="botBadge" class="bot-badge">--</span></h1><span>Paper / tier-based sizing</span></div></div>
+    <div class="toolbar">
+      <span id="statusPill" class="status-pill"><span class="dot"></span><span id="statusText">--</span></span>
+      <span id="updated" class="small">-</span>
+      <button id="resetBtn">Resetar banca</button>
+      <button id="refreshBtn">Atualizar</button>
+    </div>
+  </header>
+
+  <section id="alerts"></section>
+  <section id="killsBox" class="hidden"></section>
+
+  <nav class="tabnav" role="tablist" aria-label="Navegacao principal">
+    <button data-tab="overview" aria-selected="true">Visao geral</button>
+    <button data-tab="trades" aria-selected="false">Trades <span class="badge" id="tabTradesBadge">0</span></button>
+    <button data-tab="strategies" aria-selected="false">Estrategias <span class="badge" id="tabStratsBadge">0</span></button>
+    <button data-tab="risk" aria-selected="false">Risco <span class="badge" id="tabRiskBadge">0</span></button>
+    <button data-tab="logs" aria-selected="false">Logs <span class="badge" id="tabLogsBadge">0</span></button>
+  </nav>
+
+  <!-- ========== VISAO GERAL ========== -->
+  <section class="tabpanel active" data-tab="overview">
+    <section class="hero" id="hero"></section>
+    <section class="kpis" id="todayKpis"></section>
+    <section class="grid">
+      <div class="stack">
+        <div class="panel"><h2>Posicoes abertas <span class="meta" id="posCount">0</span></h2><div class="cards" id="assets"></div></div>
+      </div>
+      <div class="stack">
+        <div class="panel" id="stratSummary"></div>
+        <details class="events-wrap"><summary>Eventos recentes</summary><div class="events" id="eventsOverview"></div></details>
+      </div>
+    </section>
+  </section>
+
+  <!-- ========== TRADES ========== -->
+  <section class="tabpanel" data-tab="trades">
+    <div class="subtabs" role="toolbar" aria-label="Filtros">
+      <div class="seg" id="tradeFilter">
+        <button data-filter="all" aria-pressed="true">Todos <span id="cAll">0</span></button>
+        <button data-filter="open" aria-pressed="false">Abertos <span id="cOpen">0</span></button>
+        <button data-filter="closed" aria-pressed="false">Fechados <span id="cClosed">0</span></button>
+        <button data-filter="pending" aria-pressed="false">Pendentes <span id="cPending">0</span></button>
+      </div>
+      <label class="search">
+        <span aria-hidden="true">&#x1F50D;</span>
+        <input id="tradeSearch" type="search" placeholder="Buscar: ativo, estrategia, timeframe">
+      </label>
+      <button class="reset" id="tradeExport" title="Exportar trades filtrados como CSV">Export CSV</button>
+      <button class="reset" id="tradeReset">Limpar filtros</button>
+    </div>
+    <div class="richtable">
+      <div class="scroll">
+        <table id="richTradeTable">
+          <thead>
+            <tr>
+              <th class="lft" data-sort="asset">Ativo</th>
+              <th data-sort="size_usd">Tamanho</th>
+              <th data-sort="side">Sentido</th>
+              <th data-sort="entry_price">Compra</th>
+              <th data-sort="exit_price">Venda</th>
+              <th data-sort="current_price">Atual</th>
+              <th data-sort="take_price">Take</th>
+              <th data-sort="stop_price">Stop/BE</th>
+              <th data-sort="max_neg_usd">Max.Neg</th>
+              <th data-sort="pnl_usd">PnL Atual</th>
+              <th data-sort="max_pos_usd">Max.Pos</th>
+              <th data-sort="opened_at">Abertura</th>
+              <th data-sort="closed_at">Fechamento</th>
+              <th data-sort="duration_s">Tempo</th>
+              <th class="lft" data-sort="strategy_key">Estrategia</th>
+              <th data-sort="timeframe">TF</th>
+            </tr>
+          </thead>
+          <tbody id="richTradeBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== ESTRATEGIAS ========== -->
+  <section class="tabpanel" data-tab="strategies">
+    <div class="grid">
+      <div class="panel"><h2>Ranking de estrategias <span class="meta" id="rankMeta">por PnL realizado</span></h2><div id="ranking"></div></div>
+      <div class="stack">
+        <div class="panel" id="stratSummary2"></div>
+        <div class="panel"><h2>Estrategias ativas no loop <span class="meta" id="activeMeta">0</span></h2><div id="activeList"></div></div>
+      </div>
+    </div>
+  </section>
+
+
+
+  <!-- ========== RISCO ========== -->
+  <section class="tabpanel" data-tab="risk">
+    <div class="risk-grid" id="riskGrid"></div>
+    <div class="panel" style="margin-top:14px"><h2>Estrategias pausadas <span class="meta" id="pausedMeta">0</span></h2><div id="pausedList"></div></div>
+  </section>
+
+  <!-- ========== LOGS ========== -->
+  <section class="tabpanel" data-tab="logs">
+    <div class="panel"><h2>Eventos recentes <span class="meta" id="eventsMeta">0</span></h2><div class="events" id="eventsLogs" style="max-height:540px"></div></div>
+  </section>
+
+</div>
+
+<!-- Drawer lateral de detalhes do trade -->
+<div id="drawerBackdrop" class="drawer-backdrop"></div>
+<aside id="drawer" class="drawer" aria-hidden="true">
+  <header>
+    <div>
+      <h3 id="drawerTitle">—</h3>
+      <div class="sub" id="drawerSub">—</div>
+    </div>
+    <button class="close" id="drawerClose" aria-label="Fechar">&times;</button>
+  </header>
+  <div class="body" id="drawerBody"></div>
+</aside>
+<script src="/static/trade_dashboard.js"></script>
+</body>
+</html>

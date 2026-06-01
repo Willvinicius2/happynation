@@ -60,12 +60,16 @@ def _env_csv_set(name: str, default: str) -> set[str]:
     return {part.strip().upper() for part in raw.split(",") if part.strip()}
 
 
-# Gates configuraveis via env. Defaults alinhados com o ranking (paper_ready),
-# nao com filtros conservadores extras. O usuario que estiver mais conservador
-# sobe os limites via env (AETHER_DEPLOY_MIN_PNL_PCT etc).
+def _env_csv_list(name: str, default: str) -> list[str]:
+    raw = os.environ.get(name, default)
+    return [part.strip().lower() for part in raw.split(",") if part.strip()]
+
+
+# Gates configuraveis via env. MDD <= 0 desliga o bloqueio por drawdown:
+# o deploy passa a decidir por lucro/trades/score/Critic/caps.
 MIN_SCORE = _env_float("AETHER_DEPLOY_MIN_SCORE", 0.42)
 MIN_TRADES = _env_int("AETHER_DEPLOY_MIN_TRADES", 12)
-MAX_MDD_PCT = _env_float("AETHER_DEPLOY_MAX_MDD_PCT", 35.0)
+MAX_MDD_PCT = _env_float("AETHER_DEPLOY_MAX_MDD_PCT", 0.0)
 MIN_PNL_PCT = _env_float("AETHER_DEPLOY_MIN_PNL_PCT", 0.5)
 # 'approved' = exige Critic aprovado; 'any' = aceita pending/sem critic.
 CRITIC_GATE = os.environ.get("AETHER_DEPLOY_CRITIC_GATE", "approved").strip().lower()
@@ -84,6 +88,13 @@ ALLOWED_TIMEFRAMES = _env_csv_set("AETHER_DEPLOY_ALLOWED_TIMEFRAMES", "1H")
 
 # Maximo total deployado.
 DEPLOY_TOP_N = _env_int("AETHER_DEPLOY_TOP_N", 250)
+MANAGED_SOURCE_PATTERNS = _env_csv_list("AETHER_DEPLOY_MANAGED_SOURCES", "aether_auto_deploy,aether_happynation")
+RESPECT_UNMANAGED_CAPS = _env_bool("AETHER_DEPLOY_RESPECT_UNMANAGED_CAPS", True)
+TRADE_COUNT_WEIGHT = _env_float("AETHER_DEPLOY_TRADE_COUNT_WEIGHT", 0.35)
+PNL_WEIGHT = _env_float("AETHER_DEPLOY_PNL_WEIGHT", 0.08)
+SHARPE_WEIGHT = _env_float("AETHER_DEPLOY_SHARPE_WEIGHT", 0.08)
+MDD_PENALTY = _env_float("AETHER_DEPLOY_MDD_PENALTY", 0.10)
+FAST_TF_BONUS = _env_float("AETHER_DEPLOY_FAST_TF_BONUS", 0.08)
 
 # Default risk se nao houver no node.
 # TP 10% deixa o trail decidir a saida na maioria dos casos: ele reage ao
@@ -231,7 +242,7 @@ def _passes_deploy_gates(metrics: dict, score: float) -> bool:
         return False
     if score < MIN_SCORE:
         return False
-    if _as_float(_pick_metric(metrics, "mdd_pct", "oos_mdd_pct")) > MAX_MDD_PCT:
+    if MAX_MDD_PCT > 0 and _as_float(_pick_metric(metrics, "mdd_pct", "oos_mdd_pct")) > MAX_MDD_PCT:
         return False
     # Critic gate configuravel: 'approved' exige aprovacao explicita;
     # 'any' aceita pending/sem critic mas ainda bloqueia rejected.
@@ -325,6 +336,45 @@ def _asset_family_tf_key(rec: dict) -> str:
     return "|".join([_asset_for(rec), _family_for(rec), str(rec.get("timeframe") or "")])
 
 
+def _source_matches_pattern(source: str, pattern: str) -> bool:
+    pattern = str(pattern or "").strip().lower()
+    if not pattern:
+        return False
+    if pattern == "*":
+        return True
+    if pattern.endswith("*"):
+        return source.startswith(pattern[:-1])
+    return source == pattern
+
+
+def _is_managed_record(rec: dict) -> bool:
+    """Records managed by this deploy loop may be rotated out.
+
+    Legacy Aether deploys such as ``aether_happynation`` are rotatable, while
+    manual ranking deploys remain reserved slots unless the operator opts in
+    through AETHER_DEPLOY_MANAGED_SOURCES.
+    """
+    source = str(rec.get("source") or rec.get("origin") or "").strip().lower()
+    return any(_source_matches_pattern(source, pattern) for pattern in MANAGED_SOURCE_PATTERNS)
+
+
+def _seed_cap_counts(records: list[dict]) -> tuple[dict[str, int], dict[str, int], dict[str, int], dict[tuple[str, str], int]]:
+    family_counts: dict[str, int] = {}
+    asset_counts: dict[str, int] = {}
+    asset_family_tf_counts: dict[str, int] = {}
+    hyp_asset_counts: dict[tuple[str, str], int] = {}
+    for rec in records:
+        family = _family_for(rec)
+        asset = _asset_for(rec)
+        asset_family_tf = _asset_family_tf_key(rec)
+        hyp_key = (_hypothesis_base_name(rec), asset)
+        family_counts[family] = family_counts.get(family, 0) + 1
+        asset_counts[asset] = asset_counts.get(asset, 0) + 1
+        asset_family_tf_counts[asset_family_tf] = asset_family_tf_counts.get(asset_family_tf, 0) + 1
+        hyp_asset_counts[hyp_key] = hyp_asset_counts.get(hyp_key, 0) + 1
+    return family_counts, asset_counts, asset_family_tf_counts, hyp_asset_counts
+
+
 def _functional_fingerprint(rec: dict) -> tuple:
     """Identidade pelo *resultado* do backtest, nao pelos params.
 
@@ -350,6 +400,61 @@ def _record_manifest_view(rec: dict) -> str:
     return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
 
+def _summary_float(rec: dict, key: str, default: float = 0.0) -> float:
+    summary = rec.get("summary") if isinstance(rec.get("summary"), dict) else {}
+    return _as_float(summary.get(key), default)
+
+
+def _timeframe_minutes(timeframe: str) -> int | None:
+    tf = str(timeframe or "").strip().lower()
+    table = {
+        "1m": 1,
+        "3m": 3,
+        "5m": 5,
+        "15m": 15,
+        "30m": 30,
+        "1h": 60,
+        "2h": 120,
+        "4h": 240,
+        "6h": 360,
+        "8h": 480,
+        "12h": 720,
+        "1d": 1440,
+    }
+    return table.get(tf)
+
+
+def _fast_timeframe_bonus(timeframe: str) -> float:
+    minutes = _timeframe_minutes(timeframe)
+    if minutes is None or minutes <= 0:
+        return 0.0
+    if minutes <= 15:
+        return FAST_TF_BONUS
+    if minutes <= 60:
+        return FAST_TF_BONUS * 0.65
+    if minutes <= 240:
+        return FAST_TF_BONUS * 0.25
+    return 0.0
+
+
+def _deploy_rank_score(base_score: float, rec: dict) -> float:
+    """Ranking operacional: robustez primeiro, mas com vies de mais amostras.
+
+    O score original do Aether continua sendo gate e fica no manifest. Este
+    ranking so decide quais candidatos entram quando ha mais paper-ready que
+    slots disponiveis.
+    """
+    trades = _summary_float(rec, "trade_count")
+    pnl = _summary_float(rec, "pnl_pct")
+    sharpe = _summary_float(rec, "sharpe")
+    mdd = _summary_float(rec, "mdd_pct")
+    trade_bonus = min(max(trades, 0.0), 180.0) / 180.0 * TRADE_COUNT_WEIGHT
+    pnl_bonus = min(max(pnl, 0.0), 200.0) / 200.0 * PNL_WEIGHT
+    sharpe_bonus = min(max(sharpe, 0.0), 3.0) / 3.0 * SHARPE_WEIGHT
+    mdd_drag = min(max(mdd, 0.0), 50.0) / 50.0 * MDD_PENALTY
+    return base_score + trade_bonus + pnl_bonus + sharpe_bonus + _fast_timeframe_bonus(str(rec.get("timeframe") or "")) - mdd_drag
+
+
 def _hypothesis_base_name(rec: dict) -> str:
     """Extrai o nome base da hipotese descartando sufixos de timeframe.
 
@@ -370,12 +475,12 @@ def _hypothesis_base_name(rec: dict) -> str:
 MAX_PER_HYPOTHESIS_ASSET = _env_int("AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET", 0)
 
 
-def _select_deploy_records(ranked: list[tuple[float, dict]]) -> list[tuple[float, dict]]:
+def _select_deploy_records(
+    ranked: list[tuple[float, dict]],
+    reserved_records: list[dict] | None = None,
+) -> list[tuple[float, dict]]:
     selected: list[tuple[float, dict]] = []
-    family_counts: dict[str, int] = {}
-    asset_counts: dict[str, int] = {}
-    asset_family_tf_counts: dict[str, int] = {}
-    hyp_asset_counts: dict[tuple[str, str], int] = {}
+    family_counts, asset_counts, asset_family_tf_counts, hyp_asset_counts = _seed_cap_counts(reserved_records or [])
     for score, rec in ranked:
         family = _family_for(rec)
         asset = _asset_for(rec)
@@ -415,7 +520,8 @@ def run_once(log: logging.Logger) -> dict:
         if _block_reason(blocklist, str(rec.get("id") or ""), str(row["id"] or "")):
             blocked += 1
             continue
-        candidates.append((float(row["score"]), rec))
+        base_score = float(row["score"])
+        candidates.append((_deploy_rank_score(base_score, rec), rec))
     # Dedupe estrutural por (engine, params, asset, risk) — preserva o de maior score.
     by_key: dict[str, tuple[float, dict]] = {}
     for score, rec in candidates:
@@ -437,13 +543,18 @@ def run_once(log: logging.Logger) -> dict:
             by_func[fp] = (score, rec)
     func_dropped = after_struct - len(by_func)
     ranked = sorted(by_func.values(), key=lambda x: -x[0])
-    deduped = _select_deploy_records(ranked)
+    active_records = list_active()
+    reserved_records = [
+        rec for rec in active_records
+        if RESPECT_UNMANAGED_CAPS and not _is_managed_record(rec)
+    ]
+    deduped = _select_deploy_records(ranked, reserved_records=reserved_records)
 
     # Identifica o que precisa sair: ids do manifest atual nao mais elegiveis.
     current_records = {
         str(s.get("id")): s
-        for s in list_active()
-        if s.get("source") == "aether_auto_deploy" and s.get("id")
+        for s in active_records
+        if _is_managed_record(s) and s.get("id")
     }
     current_ids = set(current_records)
     keep_ids = {rec["id"] for _score, rec in deduped}
@@ -478,8 +589,11 @@ def main() -> int:
     log = _setup_logger()
     log.info(f"auto_deploy iniciado db={db_path()} poll={POLL_SECONDS}s")
     log.info(
-        "config: min_trades=%s top_n=%s assets=%s timeframes=%s max_family=%s max_asset=%s max_asset_family_tf=%s max_hyp_asset=%s",
+        "config: min_score=%s min_pnl=%s min_trades=%s max_mdd=%s top_n=%s assets=%s timeframes=%s max_family=%s max_asset=%s max_asset_family_tf=%s max_hyp_asset=%s managed_sources=%s respect_unmanaged_caps=%s",
+        MIN_SCORE,
+        MIN_PNL_PCT,
         MIN_TRADES,
+        "off" if MAX_MDD_PCT <= 0 else MAX_MDD_PCT,
         DEPLOY_TOP_N,
         ",".join(sorted(ALLOWED_ASSETS)) or "*",
         ",".join(sorted(ALLOWED_TIMEFRAMES)) or "*",
@@ -487,6 +601,8 @@ def main() -> int:
         MAX_PER_ASSET,
         MAX_PER_ASSET_FAMILY_TF,
         MAX_PER_HYPOTHESIS_ASSET,
+        ",".join(MANAGED_SOURCE_PATTERNS) or "(none)",
+        RESPECT_UNMANAGED_CAPS,
     )
     log.info("blocklist=%s", BLOCKLIST_PATH)
     while True:

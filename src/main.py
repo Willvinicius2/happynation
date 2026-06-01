@@ -47,6 +47,7 @@ from binance.client import Client
 
 from src.modules.BinanceTraderBot import BinanceTraderBot
 from src.modules.BinanceClient import BinanceClient
+from src.modules.binance_credentials import looks_like_real_binance_credentials
 from src.modules.PaperBalanceLogger import mark_to_market
 from src.models.stock_start_model import StockStartModel
 from src.modules.MarketDataHub import MarketDataHub, set_hub
@@ -149,10 +150,7 @@ print(f"[CONFIG] portfolio carregado: {len(portfolio_cfg.assets)} ativos, TFs de
 api_key = os.getenv("BINANCE_API_KEY")
 secret_key = os.getenv("BINANCE_SECRET_KEY")
 offline_mode = os.getenv("OFFLINE_MODE", "false").lower() == "true"
-keys_invalid = (
-    not api_key or not secret_key
-    or "Cole" in (api_key or "") or "Cole" in (secret_key or "")
-)
+keys_invalid = not looks_like_real_binance_credentials(api_key, secret_key)
 hub_disabled = os.getenv("MARKET_DATA_HUB_DISABLED", "false").lower() == "true"
 
 # Cliente para REST (backfill, exchangeInfo, ticker)
@@ -223,11 +221,11 @@ CHAMPIONS_BASE = {
 def MULTI_ARGS():
     return {
         "champion_args": dict(CHAMPIONS_BASE),
-        # Fase de teste: 1 voto basta pra disparar compra. Em producao subir
-        # pra 2 (consenso) quando quiser filtrar mais sinal isolado.
-        "min_buy_votes": 1,
+        # Consenso minimo: entradas isoladas geraram reentradas ruins no paper.
+        # Para coleta agressiva de amostras, use AETHER_ONLY_MIN_BUY_VOTES=1.
+        "min_buy_votes": 2,
         "min_sell_votes": 1,
-        "min_buy_weight": 1.0,
+        "min_buy_weight": 2.0,
         "min_sell_weight": 1.0,
         "bot_timeframe": "15m",
         "entry_mode": "normal",

@@ -1099,14 +1099,14 @@ def test_codex_cli_does_not_inherit_openai_api_keys(monkeypatch):
     monkeypatch.setenv("AETHER_CODEX_TRANSPORT", "codex_cli")
     monkeypatch.setattr(llm_runtime.shutil, "which", lambda name: "codex")
 
-    def fake_run(*args, **kwargs):
+    def fake_run(args, **kwargs):
         captured["env"] = kwargs["env"]
-        output_path = args[0][args[0].index("-o") + 1]
+        output_path = args[args.index("-o") + 1]
         with open(output_path, "w", encoding="utf-8") as handle:
             handle.write('{"hypotheses": []}')
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(llm_runtime.subprocess, "run", fake_run)
+    monkeypatch.setattr(llm_runtime, "_run_capture_with_tree_timeout", fake_run)
 
     result = llm_runtime.call_codex_cli_result(
         system="system",
@@ -1132,14 +1132,14 @@ def test_codex_cli_uses_explicit_path(tmp_path, monkeypatch):
     monkeypatch.setattr(llm_runtime.shutil, "which", lambda name: None)
     monkeypatch.setattr(llm_runtime, "_cli_usable", lambda path: path == str(fake_cli))
 
-    def fake_run(*args, **kwargs):
-        captured["args"] = args[0]
-        output_path = args[0][args[0].index("-o") + 1]
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        output_path = args[args.index("-o") + 1]
         with open(output_path, "w", encoding="utf-8") as handle:
             handle.write("OK")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(llm_runtime.subprocess, "run", fake_run)
+    monkeypatch.setattr(llm_runtime, "_run_capture_with_tree_timeout", fake_run)
 
     provider = llm_runtime._provider_for_name("openai")
     result = llm_runtime.call_codex_cli_result(system="system", prompt="prompt", provider=provider)

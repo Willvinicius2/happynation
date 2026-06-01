@@ -85,6 +85,8 @@ def test_multi_strategy_sells_position_with_sell_consensus():
 
 def test_multi_strategy_includes_active_specs_as_independent_votes(monkeypatch):
     monkeypatch.setenv("PAPER_TRADING", "true")
+    monkeypatch.setenv("AETHER_ONLY_MIN_BUY_VOTES", "1")
+    monkeypatch.setenv("AETHER_ONLY_MIN_BUY_WEIGHT", "1")
     data = pd.DataFrame({"close_price": [100, 101]})
     strategies = [
         VoteSpec("fixed-buy", buy_signal),  # >=2 votos exigido pelo piso
@@ -108,6 +110,33 @@ def test_multi_strategy_includes_active_specs_as_independent_votes(monkeypatch):
     )
 
     assert decision is True
+
+
+def test_multi_strategy_aether_only_requires_two_buy_votes_by_default(monkeypatch):
+    monkeypatch.delenv("AETHER_ONLY_MIN_BUY_VOTES", raising=False)
+    monkeypatch.delenv("AETHER_ONLY_MIN_BUY_WEIGHT", raising=False)
+    data = pd.DataFrame({"close_price": [100, 101]})
+
+    class ActiveBuy:
+        name = "AetherBuy"
+        params = {}
+        needs_instance = False
+
+        @staticmethod
+        def function(stock_data, verbose=False):
+            return True
+
+    trader = DummyTrader()
+    decision = MultiStrategy(
+        trader,
+        stock_data=data,
+        verbose=False,
+        active_strategy_specs=[ActiveBuy()],
+    )
+
+    assert decision is None
+    assert trader.last_strategy_snapshot["min_buy_votes"] == 2
+    assert trader.last_strategy_snapshot["min_buy_weight"] == 2.0
 
 
 def test_multi_strategy_uses_copied_data_per_strategy(monkeypatch):
@@ -183,6 +212,8 @@ def test_multi_strategy_skips_dead_active_specs(monkeypatch):
     import src.modules.PaperBalanceLogger as paper
 
     monkeypatch.setenv("AETHER_SKIP_DEAD_STRATEGIES", "true")
+    monkeypatch.setenv("AETHER_ONLY_MIN_BUY_VOTES", "1")
+    monkeypatch.setenv("AETHER_ONLY_MIN_BUY_WEIGHT", "1")
     monkeypatch.setattr(paper, "get_paused_strategies", lambda: {})
     monkeypatch.setattr(
         paper,
@@ -221,3 +252,46 @@ def test_multi_strategy_skips_dead_active_specs(monkeypatch):
     snapshot = trader.last_strategy_snapshot
     assert snapshot["buy_votes"] == ["AetherLive"]
     assert "AetherDead:sem_sinal" in snapshot["skipped_votes"]
+
+
+def test_multi_strategy_ignores_paused_owner_for_exit_fallback(monkeypatch):
+    import src.modules.PaperBalanceLogger as paper
+
+    monkeypatch.setenv("AETHER_OWNER_DECIDES_EXIT", "true")
+    monkeypatch.setattr(paper, "get_paused_strategies", lambda: {"AetherOwner": "loss streak"})
+    monkeypatch.setattr(paper, "get_position_owners", lambda asset: ["AetherOwner"])
+    monkeypatch.setattr(paper, "record_strategy_votes", lambda asset, snapshot: None)
+    monkeypatch.setattr(paper, "update_strategy_activity", lambda strategy_name, voted: None)
+    data = pd.DataFrame({"close_price": [100, 99]})
+
+    class OtherSell:
+        name = "AetherOther"
+        params = {}
+        needs_instance = False
+
+        @staticmethod
+        def function(stock_data, verbose=False):
+            return False
+
+    class PausedOwner:
+        name = "AetherOwner"
+        params = {}
+        needs_instance = False
+
+        @staticmethod
+        def function(stock_data, verbose=False):
+            raise AssertionError("paused owner should not run")
+
+    trader = PositionedTrader()
+    trader.operation_code = "BTCUSDT"
+    decision = MultiStrategy(
+        trader,
+        stock_data=data,
+        verbose=False,
+        active_strategy_specs=[PausedOwner(), OtherSell()],
+    )
+
+    assert decision is False
+    snapshot = trader.last_strategy_snapshot
+    assert snapshot["owner_strategies"] == []
+    assert "AetherOwner:pausada" in snapshot["skipped_votes"]

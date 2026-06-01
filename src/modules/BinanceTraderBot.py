@@ -3,20 +3,26 @@ import os
 import time
 from datetime import datetime
 import logging
-import math
 
 from dotenv import load_dotenv
 import pandas as pd
+
 from tinydb import TinyDB, Query
 from binance.client import Client
 from binance.enums import *
 from binance.enums import SIDE_SELL, ORDER_TYPE_STOP_LOSS_LIMIT
+
 from binance.exceptions import BinanceAPIException
 
 from src.modules.BinanceClient import BinanceClient
+from src.modules.binance_credentials import looks_like_real_binance_credentials
 from src.modules.TraderOrder import TraderOrder
 from src.modules.Logger import *
 from src.modules.TelegramNotifier import notificar_compra, notificar_venda, notificar_stop_loss, notificar_trailing_stop, notificar_take_profit
+from src.modules.order_math import (
+    adjust_to_step as _adjust_to_step,
+    validate_position_size as _validate_position_size,
+)
 
 from src.modules.StrategyRunner import StrategyRunner
 from src.modules.PaperBalanceLogger import (
@@ -152,10 +158,7 @@ class BinanceTraderBot:
         self.time_to_sleep = time_to_trade
 
         offline_mode = os.getenv("OFFLINE_MODE", "false").lower() == "true"
-        keys_invalid = (
-            not api_key or not secret_key
-            or "Cole" in (api_key or "") or "Cole" in (secret_key or "")
-        )
+        keys_invalid = not looks_like_real_binance_credentials(api_key, secret_key)
         self.live_data_only = keys_invalid and not offline_mode
 
         if offline_mode:
@@ -299,6 +302,7 @@ class BinanceTraderBot:
             # Reseta o trailing stop se a posição for vendida
             if self.actual_trade_position == False:
                 self.reset_trailing_state()
+            return True
 
         except BinanceAPIException as e:
             print(f"Erro na atualização de dados: {e}")
@@ -309,6 +313,7 @@ class BinanceTraderBot:
         except Exception as e:
             print(f"Erro inesperado em updateAllData {self.operation_code}: {e}")
             logging.error(f"updateAllData {self.operation_code}: {e}", exc_info=True)
+        return False
 
     # ------------------------------------------------------------------
     # GETS Principais
@@ -686,34 +691,7 @@ class BinanceTraderBot:
         step,
         as_string=False,
     ):
-
-        if step <= 0:
-            raise ValueError("O valor de 'step' deve ser maior que zero.")
-
-        # Descobrir o número de casas decimais do step
-        decimal_places = (
-            max(
-                0,
-                abs(int(math.floor(math.log10(step)))),
-            )
-            if step < 1
-            else 0
-        )
-
-        # Ajustar o valor ao step usando floor
-        adjusted_value = math.floor(value / step) * step
-
-        # Garantir que o resultado tenha a mesma precisão do step
-        adjusted_value = round(
-            adjusted_value,
-            decimal_places,
-        )
-
-        # Retornar no formato especificado
-        if as_string:
-            return f"{adjusted_value:.{decimal_places}f}"
-        else:
-            return adjusted_value
+        return _adjust_to_step(value, step, as_string=as_string)
 
     # --------------------------------------------------------------
     # PRINTS
@@ -849,14 +827,12 @@ class BinanceTraderBot:
             from src.modules.PaperBalanceLogger import MAX_POSITION_USD, MIN_POSITION_USD
         except ImportError:
             return True, quantity, ""
-        notional = float(price) * float(quantity)
-        if notional <= MAX_POSITION_USD:
-            return True, quantity, ""
-        new_qty = MAX_POSITION_USD / float(price)
-        new_notional = new_qty * float(price)
-        if new_notional < MIN_POSITION_USD:
-            return False, 0.0, f"notional ${new_notional:.2f} < min ${MIN_POSITION_USD:.2f}"
-        return True, new_qty, f"quantity reduzida de {quantity:.6f} para {new_qty:.6f} (cap ${MAX_POSITION_USD:.2f})"
+        return _validate_position_size(
+            quantity=quantity,
+            price=price,
+            max_position_usd=MAX_POSITION_USD,
+            min_position_usd=MIN_POSITION_USD,
+        )
 
     # Compra a ação a MERCADO
     def _real_order_allowed(self, side: str) -> bool:
@@ -1999,7 +1975,17 @@ class BinanceTraderBot:
         self._cycle_rsi = None
 
         # Atualiza todos os dados
-        self.updateAllData(verbose=True)
+        data_ok = self.updateAllData(verbose=True)
+        if (
+            not data_ok
+            or self.stock_data is None
+            or getattr(self.stock_data, "empty", True)
+            or "close_price" not in self.stock_data
+        ):
+            print(f"[DATA] Sem candles validos para {self.operation_code}; pulando ciclo.", flush=True)
+            logging.warning(f"Sem candles validos para {self.operation_code}; ciclo ignorado")
+            self.time_to_sleep = self.time_to_trade
+            return
 
         print("\n-------")
         print("Detalhes:")

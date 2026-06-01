@@ -29,6 +29,16 @@ if (-not $env:AETHER_DUPLICATE_THRESHOLD)                  { $env:AETHER_DUPLICA
 if (-not $env:AETHER_LLM_PROMPT_CACHE_DISABLE)             { $env:AETHER_LLM_PROMPT_CACHE_DISABLE = "0" }
 if (-not $env:AETHER_ECONOMY_MODE)                         { $env:AETHER_ECONOMY_MODE = "1" }
 
+# Readiness LLM: quando o stack e iniciado via PowerShell, o PATH do processo
+# nem sempre enxerga o shim npm do Codex, mesmo com o CLI autenticado em
+# C:\Users\<usuario>\.codex. Expor o caminho explicito evita que
+# llm_status() marque o provider como configured=false.
+if (-not $env:AETHER_CODEX_CLI_PATH) {
+    $codexShim = Join-Path $env:APPDATA "npm\codex.cmd"
+    # Caminho esperado em Windows: AppData\Roaming\npm\codex.cmd
+    if (Test-Path $codexShim) { $env:AETHER_CODEX_CLI_PATH = $codexShim }
+}
+
 # Critic v5 (regime gate + v4 gates).
 if (-not $env:AETHER_CRITIC_MTF_DISABLE)                   { $env:AETHER_CRITIC_MTF_DISABLE = "1" }
 if (-not $env:AETHER_CRITIC_BOOTSTRAP_MIN_SHARPE_P5)       { $env:AETHER_CRITIC_BOOTSTRAP_MIN_SHARPE_P5 = "-0.3" }
@@ -38,10 +48,19 @@ if (-not $env:AETHER_CRITIC_REGIME_MIN_PASS)               { $env:AETHER_CRITIC_
 if (-not $env:AETHER_CRITIC_REGIME_MIN_PNL)                { $env:AETHER_CRITIC_REGIME_MIN_PNL = "-5.0" }
 if (-not $env:AETHER_CRITIC_REGIME_MIN_VALID)              { $env:AETHER_CRITIC_REGIME_MIN_VALID = "2" }
 
-# Manifest operacional do bot: apenas ativos operados e candle 1h.
-if (-not $env:AETHER_DEPLOY_ALLOWED_ASSETS)                { $env:AETHER_DEPLOY_ALLOWED_ASSETS = "BTCUSDT,ETHUSDT,SOLUSDT,ADAUSDT" }
-if (-not $env:AETHER_DEPLOY_ALLOWED_TIMEFRAMES)            { $env:AETHER_DEPLOY_ALLOWED_TIMEFRAMES = "15m,1h,4h,1d" }
-if (-not $env:AETHER_DEPLOY_MIN_TRADES)                    { $env:AETHER_DEPLOY_MIN_TRADES = "12" }
+# Manifest operacional do bot: alinhar com src/config/portfolio.yaml.
+# Não restringir o deploy a uma lista antiga de 4 ativos; o bot/dashboard agora
+# operam o portfólio configurado completo.
+if (-not $env:AETHER_DEPLOY_ALLOWED_ASSETS)                { $env:AETHER_DEPLOY_ALLOWED_ASSETS = "BTCUSDT,ETHUSDT,SOLUSDT,ADAUSDT,XRPUSDT,LINKUSDT,DOGEUSDT,AVAXUSDT,BNBUSDT" }
+if (-not $env:AETHER_DEPLOY_ALLOWED_TIMEFRAMES)            { $env:AETHER_DEPLOY_ALLOWED_TIMEFRAMES = "15m,1h,4h" }
+if (-not $env:AETHER_DEPLOY_MIN_TRADES)                    { $env:AETHER_DEPLOY_MIN_TRADES = "60" }
+if (-not $env:AETHER_DEPLOY_MAX_MDD_PCT)                   { $env:AETHER_DEPLOY_MAX_MDD_PCT = "0" }
+if (-not $env:AETHER_DEPLOY_TRADE_COUNT_WEIGHT)            { $env:AETHER_DEPLOY_TRADE_COUNT_WEIGHT = "0.35" }
+if (-not $env:AETHER_DEPLOY_PNL_WEIGHT)                    { $env:AETHER_DEPLOY_PNL_WEIGHT = "0.08" }
+if (-not $env:AETHER_DEPLOY_SHARPE_WEIGHT)                 { $env:AETHER_DEPLOY_SHARPE_WEIGHT = "0.08" }
+if (-not $env:AETHER_DEPLOY_MDD_PENALTY)                   { $env:AETHER_DEPLOY_MDD_PENALTY = "0.10" }
+if (-not $env:AETHER_DEPLOY_FAST_TF_BONUS)                 { $env:AETHER_DEPLOY_FAST_TF_BONUS = "0.08" }
+
 if (-not $env:AETHER_DEPLOY_MAX_PER_FAMILY)                { $env:AETHER_DEPLOY_MAX_PER_FAMILY = "30" }
 if (-not $env:AETHER_DEPLOY_MAX_PER_ASSET)                 { $env:AETHER_DEPLOY_MAX_PER_ASSET = "12" }
 if (-not $env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF)       { $env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF = "5" }

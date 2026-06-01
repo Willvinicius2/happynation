@@ -440,12 +440,15 @@ def plan_paper_buy(asset: str, strategy: str, price: float, requested_qty: float
         # MAX_POSITION_PCT do bankroll pra evitar ordem absurda em banca pequena.
         effective_max_usd = float(override_max_usd) if override_max_usd and override_max_usd > 0 else MAX_POSITION_USD
         position_cap = min(effective_max_usd, total * (MAX_POSITION_PCT / 100.0))
+        target_request_notional = requested_notional
+        if override_max_usd and override_max_usd > 0:
+            target_request_notional = max(requested_notional, effective_max_usd)
         total_cap = total * (MAX_TOTAL_ALLOCATED_PCT / 100.0)
         allocated = float(meta.get("allocated_usd") or 0.0)
         portfolio_room = max(total_cap - allocated, 0.0)
         spendable_cash = max(free_cash - MIN_CASH_RESERVE_USD, 0.0)
         target_notional = min(
-            requested_notional,
+            target_request_notional,
             position_cap,
             portfolio_room,
             spendable_cash / _cost_multiplier(),
@@ -468,7 +471,7 @@ def plan_paper_buy(asset: str, strategy: str, price: float, requested_qty: float
             return False, 0.0, reason
         qty = target_notional / float(price)
         reason = ""
-        if target_notional < requested_notional:
+        if target_notional < target_request_notional:
             reason = f"quantidade ajustada para ${target_notional:.2f} por caixa, reserva e exposicao"
         return True, qty, reason
 

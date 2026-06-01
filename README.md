@@ -11,6 +11,7 @@ Bot de trading para Binance com paper trading, estrategias tecnicas, backtests, 
 | [docs/PROJECT.md](docs/PROJECT.md) | Mapa das pastas, entrypoints e arquitetura |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Instalar, configurar, rodar, deploy e troubleshooting |
 | [docs/STRATEGIES.md](docs/STRATEGIES.md) | Estrategias, backtests, Aether e pesquisa |
+| [docs/REFACTOR_AUDIT.md](docs/REFACTOR_AUDIT.md) | Auditoria de organizacao, faltantes e backlog de refatoracao |
 
 ## Comecar
 

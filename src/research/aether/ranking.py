@@ -32,6 +32,11 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_csv_list(name: str, default: str) -> list[str]:
+    raw = os.environ.get(name, default)
+    return [part.strip().lower() for part in raw.split(",") if part.strip()]
+
+
 READY_STATUSES = {"validated"}
 PAPER_READY_MIN_SCORE = _env_float("AETHER_PAPER_READY_MIN_SCORE", 0.42)
 PAPER_READY_MIN_TRADES = _env_int("AETHER_PAPER_READY_MIN_TRADES", 30)
@@ -237,23 +242,74 @@ _DEPLOY_ALLOWED_ASSETS = {
     for a in os.environ.get("AETHER_DEPLOY_ALLOWED_ASSETS", "BTCUSDT,ETHUSDT,SOLUSDT,ADAUSDT").split(",")
     if a.strip()
 }
+_DEPLOY_ALLOWED_TIMEFRAMES = {
+    a.strip().upper()
+    for a in os.environ.get("AETHER_DEPLOY_ALLOWED_TIMEFRAMES", "1H").split(",")
+    if a.strip()
+}
+_DEPLOY_MIN_SCORE = _env_float("AETHER_DEPLOY_MIN_SCORE", 0.42)
+_DEPLOY_MIN_TRADES = _env_int("AETHER_DEPLOY_MIN_TRADES", 12)
+_DEPLOY_MIN_PNL_PCT = _env_float("AETHER_DEPLOY_MIN_PNL_PCT", 0.5)
+_DEPLOY_MAX_MDD_PCT = _env_float("AETHER_DEPLOY_MAX_MDD_PCT", 0.0)
+_DEPLOY_CRITIC_GATE = os.environ.get("AETHER_DEPLOY_CRITIC_GATE", "approved").strip().lower()
 _DEPLOY_MAX_PER_FAMILY = _env_int("AETHER_DEPLOY_MAX_PER_FAMILY", 8)
 _DEPLOY_MAX_PER_ASSET = _env_int("AETHER_DEPLOY_MAX_PER_ASSET", 5)
 _DEPLOY_MAX_PER_ASSET_FAMILY_TF = _env_int("AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF", 1)
+_DEPLOY_MANAGED_SOURCE_PATTERNS = _env_csv_list(
+    "AETHER_DEPLOY_MANAGED_SOURCES",
+    "aether_auto_deploy,aether_happynation",
+)
+
+
+def _source_matches_pattern(source: str, pattern: str) -> bool:
+    pattern = str(pattern or "").strip().lower()
+    if not pattern:
+        return False
+    if pattern == "*":
+        return True
+    if pattern.endswith("*"):
+        return source.startswith(pattern[:-1])
+    return source == pattern
+
+
+def _is_managed_deploy_record(rec: dict[str, Any]) -> bool:
+    source = str(rec.get("source") or rec.get("origin") or "").strip().lower()
+    return any(_source_matches_pattern(source, pattern) for pattern in _DEPLOY_MANAGED_SOURCE_PATTERNS)
 
 
 def _deploy_cap_state(deployed_recs: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     family: dict[str, int] = {}
     asset: dict[str, int] = {}
     aft: dict[str, int] = {}
+    unmanaged_family: dict[str, int] = {}
+    unmanaged_asset: dict[str, int] = {}
+    unmanaged_aft: dict[str, int] = {}
     for rec in deployed_recs:
         fam = str(rec.get("engine") or rec.get("template") or "?")
         sym = str(rec.get("asset") or rec.get("symbol") or "?").upper()
         tf = str(rec.get("timeframe") or "")
         family[fam] = family.get(fam, 0) + 1
         asset[sym] = asset.get(sym, 0) + 1
-        aft["|".join([sym, fam, tf])] = aft.get("|".join([sym, fam, tf]), 0) + 1
-    return {"family": family, "asset": asset, "aft": aft}
+        aft_key = "|".join([sym, fam, tf])
+        aft[aft_key] = aft.get(aft_key, 0) + 1
+        if not _is_managed_deploy_record(rec):
+            unmanaged_family[fam] = unmanaged_family.get(fam, 0) + 1
+            unmanaged_asset[sym] = unmanaged_asset.get(sym, 0) + 1
+            unmanaged_aft[aft_key] = unmanaged_aft.get(aft_key, 0) + 1
+    return {
+        "family": family,
+        "asset": asset,
+        "aft": aft,
+        "unmanaged_family": unmanaged_family,
+        "unmanaged_asset": unmanaged_asset,
+        "unmanaged_aft": unmanaged_aft,
+    }
+
+
+def _cap_message(label: str, count: int, cap: int, unmanaged_count: int) -> str:
+    if unmanaged_count >= cap:
+        return f"Cap saturado: {label} ja tem {cap} no bot"
+    return f"Cap rotacionavel: {label} tem {count}/{cap}; auto_deploy pode trocar gerenciaveis se o ranking vencer"
 
 
 def _deploy_blocker(
@@ -267,12 +323,50 @@ def _deploy_blocker(
     tf = str(best.get("timeframe") or item.get("timeframe") or "")
     if _DEPLOY_ALLOWED_ASSETS and "*" not in _DEPLOY_ALLOWED_ASSETS and sym not in _DEPLOY_ALLOWED_ASSETS:
         return f"Asset {sym or '?'} fora da allowlist do bot ({','.join(sorted(_DEPLOY_ALLOWED_ASSETS))})"
-    if _DEPLOY_MAX_PER_ASSET_FAMILY_TF > 0 and cap_state["aft"].get("|".join([sym, eng, tf]), 0) >= _DEPLOY_MAX_PER_ASSET_FAMILY_TF:
-        return f"Cap saturado: ja existe {eng}/{sym}/{tf} no bot (max {_DEPLOY_MAX_PER_ASSET_FAMILY_TF})"
-    if _DEPLOY_MAX_PER_FAMILY > 0 and cap_state["family"].get(eng, 0) >= _DEPLOY_MAX_PER_FAMILY:
-        return f"Cap saturado: familia {eng} ja tem {_DEPLOY_MAX_PER_FAMILY} no bot"
-    if _DEPLOY_MAX_PER_ASSET > 0 and cap_state["asset"].get(sym, 0) >= _DEPLOY_MAX_PER_ASSET:
-        return f"Cap saturado: asset {sym} ja tem {_DEPLOY_MAX_PER_ASSET} no bot"
+    if _DEPLOY_ALLOWED_TIMEFRAMES and "*" not in _DEPLOY_ALLOWED_TIMEFRAMES and tf.upper() not in _DEPLOY_ALLOWED_TIMEFRAMES:
+        return f"Timeframe {tf or '?'} fora da allowlist do bot ({','.join(sorted(_DEPLOY_ALLOWED_TIMEFRAMES))})"
+    score = _as_float(item.get("score"))
+    pnl_pct = _as_float(item.get("pnl_pct"))
+    trade_count = int(_as_float(item.get("trade_count")))
+    mdd_pct = _as_float(item.get("mdd_pct"))
+    if score < _DEPLOY_MIN_SCORE:
+        return f"Gate deploy: score {score:.4f} < {_DEPLOY_MIN_SCORE:.4f}"
+    if pnl_pct < _DEPLOY_MIN_PNL_PCT:
+        return f"Gate deploy: PnL {pnl_pct:.2f}% < {_DEPLOY_MIN_PNL_PCT:.2f}%"
+    if trade_count < _DEPLOY_MIN_TRADES:
+        return f"Gate deploy: trades {trade_count} < {_DEPLOY_MIN_TRADES}"
+    if _DEPLOY_MAX_MDD_PCT > 0 and mdd_pct > _DEPLOY_MAX_MDD_PCT:
+        return f"Gate deploy: MDD {mdd_pct:.2f}% > {_DEPLOY_MAX_MDD_PCT:.2f}%"
+    critic_status = metrics.get("critic_status")
+    if critic_status == "rejected":
+        return "Gate deploy: Critic rejeitou"
+    if _DEPLOY_CRITIC_GATE == "approved" and critic_status != "approved":
+        return "Gate deploy: Critic pendente"
+    aft_key = "|".join([sym, eng, tf])
+    aft_count = cap_state["aft"].get(aft_key, 0)
+    if _DEPLOY_MAX_PER_ASSET_FAMILY_TF > 0 and aft_count >= _DEPLOY_MAX_PER_ASSET_FAMILY_TF:
+        return _cap_message(
+            f"{eng}/{sym}/{tf}",
+            aft_count,
+            _DEPLOY_MAX_PER_ASSET_FAMILY_TF,
+            cap_state["unmanaged_aft"].get(aft_key, 0),
+        )
+    family_count = cap_state["family"].get(eng, 0)
+    if _DEPLOY_MAX_PER_FAMILY > 0 and family_count >= _DEPLOY_MAX_PER_FAMILY:
+        return _cap_message(
+            f"familia {eng}",
+            family_count,
+            _DEPLOY_MAX_PER_FAMILY,
+            cap_state["unmanaged_family"].get(eng, 0),
+        )
+    asset_count = cap_state["asset"].get(sym, 0)
+    if _DEPLOY_MAX_PER_ASSET > 0 and asset_count >= _DEPLOY_MAX_PER_ASSET:
+        return _cap_message(
+            f"asset {sym}",
+            asset_count,
+            _DEPLOY_MAX_PER_ASSET,
+            cap_state["unmanaged_asset"].get(sym, 0),
+        )
     return "Aguardando proximo ciclo do auto_deploy (~60s)"
 
 
@@ -341,21 +435,31 @@ def build_strategy_ranking(
         from .scoring import _format_period as _fmt_period
         period = _fmt_period(bars, row["timeframe"]) if bars and row["timeframe"] else ""
         score = _as_float(row["score"])
+        is_deployed = row["id"] in deployed_ids
         readiness = _readiness(row["status"], score, pnl_pct, trade_count, mdd_pct, metrics)
-        if readiness != "paper_ready":
+        if readiness != "paper_ready" and not (include_deployed and is_deployed):
             continue
 
-        is_deployed = row["id"] in deployed_ids
         deploy_blocker_msg = None if is_deployed else _deploy_blocker(
-            {"timeframe": row["timeframe"]}, metrics, cap_state
+            {
+                "timeframe": row["timeframe"],
+                "score": score,
+                "pnl_pct": pnl_pct,
+                "trade_count": trade_count,
+                "mdd_pct": mdd_pct,
+            },
+            metrics,
+            cap_state,
         )
         if (
             hide_blocked
             and not is_deployed
             and deploy_blocker_msg
             and not deploy_blocker_msg.startswith("Aguardando")
+            and not deploy_blocker_msg.startswith("Cap rotacionavel")
         ):
             continue
+
         item = {
             "node_id": row["id"],
             "campaign_id": row["campaign_id"],

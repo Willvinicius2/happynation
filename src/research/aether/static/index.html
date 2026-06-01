@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aether / RAIO</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260518-continuous-research-detail-v1">
+  <link rel="stylesheet" href="/static/styles.css?v=20260522-agent-map-v2">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 </head>
@@ -153,13 +153,40 @@
 
       <section id="mindmapView" class="mindmapView hidden">
         <div id="mermaidContainer" style="display:none;"></div>
+        <div class="agentMapHero" aria-label="Mapa interativo do Aether">
+          <div>
+            <div class="agentMapEyebrow">Aether cockpit vivo</div>
+            <h2>Mapa interativo de nodes</h2>
+            <p>Fluxo do node: familia, engine, indicadores, entrada, saida, gestao, estrategia gerada e trabalho recente dos agentes.</p>
+          </div>
+          <div class="agentMapStats">
+            <div><span>Agentes</span><strong id="agentMapAgents">--</strong></div>
+            <div><span>Rodando</span><strong id="agentMapRunning">--</strong></div>
+            <div><span>Fila</span><strong id="agentMapQueued">--</strong></div>
+            <div><span>Passando</span><strong id="agentMapPassing">--</strong></div>
+            <div><span>Atualizado</span><strong id="agentMapUpdated">--</strong></div>
+          </div>
+        </div>
+        <div class="agentStageRail" aria-label="Pipeline Aether">
+          <span>Chief</span><i></i>
+          <span>Hipotese <strong id="agentStageHypothesis">--</strong></span><i></i>
+          <span>Scout <strong id="agentStageScout">--</strong></span><i></i>
+          <span>Validacao <strong id="agentStageValidation">--</strong></span><i></i>
+          <span>Critic <strong id="agentStageCritic">--</strong></span><i></i>
+          <span>Deploy <strong id="agentStageDeploy">--</strong></span>
+        </div>
+        <div class="agentMapSelector" aria-label="Selecao de estrategias do pesquisador">
+          <button id="agentMapSelectPassingBtn" type="button">Selecionar passantes</button>
+          <span id="agentMapPassingLabel">--</span>
+        </div>
+        <div id="agentPipelineSignals" class="agentPipelineSignals" aria-label="Sinais do pipeline"></div>
         <div id="agentsGraphContainer"></div>
         <div id="agentsGraphSide" class="graphSideColumn">
           <div id="agentsGraphFocus" class="graphFocus"></div>
           <div id="agentsGraphDetail" class="graphDetail"></div>
         </div>
         <div class="graphHud">
-          <span id="agentsGraphStats">--</span> / arraste pra mover / scroll pra zoom / clique para detalhes
+          <span id="agentsGraphStats">--</span> / arraste para mover / scroll para zoom / clique nos blocos para detalhes
         </div>
       </section>
     </main>
@@ -215,6 +242,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=20260518-continuous-research-detail-v1"></script>
+  <script src="/static/app.js?v=20260522-agent-map-v2"></script>
 </body>
 </html>

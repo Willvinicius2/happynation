@@ -359,7 +359,9 @@ def _provider_for_name(name: str) -> LLMProvider:
     cli_usable = _cli_usable(cli_path) if cli_path else False
     key = _env("AETHER_OPENAI_API_KEY", "OPENAI_API_KEY")
     if transport == "auto":
-        transport = "api" if key else "codex_cli"
+        transport = "codex_cli" if cli_usable else ("api" if key else "codex_cli")
+    elif transport == "api" and cli_usable and _env_enabled("AETHER_PREFER_CODEX_CLI", "0"):
+        transport = "codex_cli"
     elif transport in {"codex_cli", "cli"} and not cli_usable and key:
         transport = "api"
     configured = bool(cli_usable) if transport in {"codex_cli", "cli"} else bool(key)
@@ -569,6 +571,127 @@ def _short_provider_error(provider: str, error: Exception | str, limit: int = 26
     return f"{provider}: {text}"
 
 
+def _clean_codex_cli_error(text: str) -> str:
+    """Keep the actionable Codex CLI failure instead of warning noise."""
+    lines = []
+    error_lines = []
+    skip_prefixes = (
+        "OpenAI Codex v",
+        "--------",
+        "workdir:",
+        "provider:",
+        "approval:",
+        "sandbox:",
+        "reasoning effort:",
+        "reasoning summaries:",
+        "session id:",
+        "user",
+        "codex",
+        "tokens used",
+        "System.Management.Automation.RemoteException",
+    )
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if " WARN codex_core_" in line:
+            continue
+        if any(line.startswith(prefix) for prefix in skip_prefixes):
+            continue
+        if line.startswith("model:"):
+            continue
+        if line.startswith("ERROR:"):
+            if line not in error_lines:
+                error_lines.append(line)
+            continue
+        lines.append(line)
+    cleaned = error_lines or lines
+    return " ".join(" ".join(cleaned).split())
+
+
+def _codex_cli_model_fallbacks(primary_model: str) -> list[str]:
+    raw = (
+        os.environ.get("AETHER_CODEX_MODEL_FALLBACKS")
+        or os.environ.get("AETHER_OPENAI_MODEL_FALLBACKS")
+        or "gpt-5.4-mini,gpt-5.4-nano"
+    )
+    out: list[str] = []
+    seen = {primary_model}
+    for part in raw.split(","):
+        model = part.strip()
+        if not model or model in seen:
+            continue
+        seen.add(model)
+        out.append(model)
+    return out
+
+
+def _codex_cli_error_allows_model_fallback(text: str) -> bool:
+    lower = str(text or "").lower()
+    return (
+        "usage limit" in lower
+        or "switch to another model" in lower
+        or "timeout" in lower
+        or "timed out" in lower
+        or "model_not_found" in lower
+        or "unknown model" in lower
+        or "unsupported model" in lower
+        or "not available for" in lower
+    )
+
+
+def _kill_process_tree(pid: int) -> None:
+    if not pid:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            return
+        except Exception:
+            pass
+    try:
+        subprocess.run(["kill", "-TERM", str(pid)], capture_output=True, text=True, timeout=5)
+    except Exception:
+        pass
+
+
+def _run_capture_with_tree_timeout(
+    args: list[str],
+    *,
+    input_text: str,
+    timeout: float,
+    cwd: str,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.Popen(
+        args,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=cwd,
+        env=env,
+    )
+    try:
+        stdout, stderr = proc.communicate(input=input_text, timeout=timeout)
+        return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        try:
+            stdout, stderr = proc.communicate(timeout=10)
+        except Exception:
+            stdout, stderr = "", ""
+        message = f"Codex CLI timeout apos {int(timeout)}s."
+        return subprocess.CompletedProcess(args, 124, stdout or "", (stderr or "") + "\n" + message)
+
+
 def call_openai_codex(
     *,
     system: str,
@@ -661,55 +784,77 @@ def call_codex_cli_result(
         f"SISTEMA:\n{system}\n\n"
         f"USUARIO:\n{prompt}"
     )
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as handle:
-        output_path = handle.name
-    try:
-        args = [
-            cli,
-            "exec",
-            "--ephemeral",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "read-only",
-            "-m",
-            provider.model,
-            "-o",
-            output_path,
-            "-",
-        ]
-        child_env = os.environ.copy()
-        child_env.pop("AETHER_OPENAI_API_KEY", None)
-        child_env.pop("OPENAI_API_KEY", None)
-        completed = subprocess.run(
-            args,
-            input=full_prompt,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            timeout=timeout,
-            cwd=os.environ.get("AETHER_CODEX_WORKDIR") or os.getcwd(),
-            env=child_env,
-        )
-        output = Path(output_path).read_text(encoding="utf-8").strip()
-    finally:
+    models = [provider.model]
+    if _env_enabled("AETHER_CODEX_MODEL_AUTO_FALLBACK", "1"):
+        models.extend(_codex_cli_model_fallbacks(provider.model))
+    errors: list[str] = []
+    effort = (
+        provider.effort
+        or os.environ.get("AETHER_CODEX_REASONING_EFFORT")
+        or os.environ.get("AETHER_OPENAI_REASONING_EFFORT")
+        or "low"
+    )
+    for index, model in enumerate(models):
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as handle:
+            output_path = handle.name
         try:
-            Path(output_path).unlink(missing_ok=True)
-        except Exception:
-            pass
-    if completed.returncode != 0:
-        err = (completed.stderr or completed.stdout or "").strip()
-        raise RuntimeError(err[:700] or f"Codex CLI saiu com codigo {completed.returncode}.")
-    if not output:
-        output = (completed.stdout or "").strip()
-    return {
-        "text": output,
-        "metadata": {
-            "transport": "codex_cli",
-            "stdout_excerpt": (completed.stdout or "")[:1000],
-            "stderr_excerpt": (completed.stderr or "")[:1000],
-        },
-    }
+            args = [
+                cli,
+                "exec",
+                "--ignore-user-config",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--sandbox",
+                "read-only",
+                "-c",
+                f'model_reasoning_effort="{effort}"',
+                "-m",
+                model,
+                "-o",
+                output_path,
+                "-",
+            ]
+            child_env = os.environ.copy()
+            child_env.pop("AETHER_OPENAI_API_KEY", None)
+            child_env.pop("OPENAI_API_KEY", None)
+            completed = _run_capture_with_tree_timeout(
+                args,
+                input_text=full_prompt,
+                timeout=timeout,
+                cwd=os.environ.get("AETHER_CODEX_WORKDIR") or os.getcwd(),
+                env=child_env,
+            )
+            output = Path(output_path).read_text(encoding="utf-8").strip()
+        finally:
+            try:
+                Path(output_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        if completed.returncode == 0:
+            if not output:
+                output = (completed.stdout or "").strip()
+            metadata = {
+                "transport": "codex_cli",
+                "stdout_excerpt": (completed.stdout or "")[:1000],
+                "stderr_excerpt": (completed.stderr or "")[:1000],
+            }
+            if index > 0:
+                metadata.update(
+                    {
+                        "model_fallback": True,
+                        "primary_model": provider.model,
+                        "used_model": model,
+                        "previous_model_errors": errors,
+                    }
+                )
+            return {"text": output, "metadata": metadata, "model": model}
+
+        raw_err = (completed.stderr or completed.stdout or "").strip()
+        err = _clean_codex_cli_error(raw_err) or raw_err
+        errors.append(f"{model}: {err[:700] or f'Codex CLI saiu com codigo {completed.returncode}.'}")
+        if not _codex_cli_error_allows_model_fallback(err):
+            break
+    raise RuntimeError(" | ".join(errors) or "Codex CLI indisponivel.")
 
 
 def _claude_api_payload(provider: "LLMProvider", system: str, prompt: str, max_tokens: int) -> dict[str, Any]:
@@ -1037,7 +1182,7 @@ def call_llm_agent(role: str, *, system: str, prompt: str, max_tokens: int = 180
             return {
                 "ok": True,
                 "provider": current.name,
-                "model": current.model,
+                "model": str(result.get("model") or current.model),
                 "effort": current.effort,
                 "transport": current.transport,
                 "text": result["text"],

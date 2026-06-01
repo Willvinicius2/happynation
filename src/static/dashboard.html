@@ -1,7 +1,7 @@
 <!doctype html>
 <!--
   DIREÇÃO B — modernizada.
-  Fundo neutro profundo (não preto puro), accent lima saturado em oklch,
+  Fundo azul profundo, accent ciano e alta densidade de leitura,
   pareamento sans (system) + mono (system) para números, densidade alta
   com mais respiro. Original — não recria UI proprietária.
 -->
@@ -12,21 +12,21 @@
 <title>HappyNation · Pesquisa</title>
 <style>
   :root{
-    --bg:        #0a0a0b;
-    --surface-1: #101012;
-    --surface-2: #16161a;
-    --line:      #1f1f24;
-    --line-2:    #2a2a31;
-    --ink:       #f2f2ee;
-    --ink-2:     #b6b6b0;
-    --ink-3:     #75757a;
-    --ink-4:     #4a4a50;
+    --bg:        #07111d;
+    --surface-1: #0b1624;
+    --surface-2: #101b2d;
+    --line:      #1e2b3f;
+    --line-2:    #263650;
+    --ink:       #e6edf7;
+    --ink-2:     #b8c7da;
+    --ink-3:     #8ea3bd;
+    --ink-4:     #5b708d;
 
-    --accent:        oklch(0.86 0.19 130);   /* lime-acid */
-    --accent-soft:   oklch(0.86 0.19 130 / 0.12);
-    --accent-line:   oklch(0.86 0.19 130 / 0.35);
-    --warn:          oklch(0.70 0.17 25);    /* warm red, drawdown / cut */
-    --warn-soft:     oklch(0.70 0.17 25 / 0.14);
+    --accent:        #22d3ee;
+    --accent-soft:   rgba(34,211,238,.12);
+    --accent-line:   rgba(103,232,249,.35);
+    --warn:          #ff6b6b;
+    --warn-soft:     rgba(255,107,107,.14);
 
     --sans: -apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
@@ -39,9 +39,13 @@
     text-rendering:optimizeLegibility;
     min-height:100vh;
     padding: 24px 40px 80px;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(34,211,238,.12), transparent 28%),
+      radial-gradient(circle at 82% 6%, rgba(56,189,248,.08), transparent 30%),
+      linear-gradient(135deg,#07111d 0%,#0b1020 52%,#111827 100%);
   }
   .num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;letter-spacing:-0.01em}
-  ::selection{background:var(--accent);color:#0a0a0b}
+  ::selection{background:var(--accent);color:#031018}
 
   button{
     font: 12px/1 var(--sans);
@@ -58,7 +62,7 @@
   button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   button[aria-pressed="true"]{
     background:var(--ink);
-    color:#0a0a0b;
+    color:#031018;
     border-color:var(--ink);
   }
 
@@ -75,7 +79,7 @@
     width:28px;height:28px;border-radius:8px;
     background:var(--accent);
     display:grid;place-items:center;
-    color:#0a0a0b;font-family:var(--mono);font-weight:700;font-size:13px;
+    color:#031018;font-family:var(--mono);font-weight:700;font-size:13px;
   }
   .bar .brand{font-weight:600;font-size:14px;letter-spacing:-0.01em}
   .bar .crumb{color:var(--ink-3);font-size:13px}

@@ -226,7 +226,7 @@ def show_balance() -> None:
     print(f"  equity:   ${meta.get('equity', 0):.2f}")
     print(f"  realized: ${meta.get('realized_pnl_usd', 0):+.2f}")
     print(f"  market_value: ${meta.get('market_value', 0):.2f}")
-    print(f"  allocated: ${meta.get('allocated', 0):.2f}")
+    print(f"  allocated: ${meta.get('allocated_usd', meta.get('allocated', 0)):.2f}")
     print(f"  updated_at: {meta.get('updated_at', '?')}")
 
 

@@ -206,9 +206,9 @@ def MultiStrategy(
 
     if using_aether_only:
         mode_name = "aether_only"
-        min_buy_votes = max(1, _env_int("AETHER_ONLY_MIN_BUY_VOTES", 1))
+        min_buy_votes = max(1, _env_int("AETHER_ONLY_MIN_BUY_VOTES", 2))
         min_sell_votes = max(1, _env_int("AETHER_ONLY_MIN_SELL_VOTES", 1))
-        min_buy_weight = max(1.0, _env_float("AETHER_ONLY_MIN_BUY_WEIGHT", 1.0))
+        min_buy_weight = max(1.0, _env_float("AETHER_ONLY_MIN_BUY_WEIGHT", 2.0))
         min_sell_weight = max(1.0, _env_float("AETHER_ONLY_MIN_SELL_WEIGHT", 1.0))
         required_buy_votes = []
 
@@ -233,8 +233,8 @@ def MultiStrategy(
             dead_strategies = set()
 
     # Pisos absolutos de seguranca para a cesta legada. No modo Aether-only,
-    # um voto ja representa uma estrategia validada/criticada; exigir dois votos
-    # impediria ativos com uma unica estrategia aprovada de operar.
+    # os pisos vem de AETHER_ONLY_* para permitir coleta agressiva explicitamente,
+    # mas o default operacional exige confluencia de dois votos.
     if not using_aether_only:
         min_buy_votes = max(min_buy_votes, HARD_FLOOR_BUY_VOTES)
         min_sell_votes = max(min_sell_votes, HARD_FLOOR_SELL_VOTES)
@@ -370,6 +370,10 @@ def MultiStrategy(
             operation_code = getattr(self, "operation_code", None)
             if operation_code:
                 owner_strategies = get_position_owners(operation_code)
+                owner_strategies = [
+                    name for name in owner_strategies
+                    if name not in paused_strategies and name not in dead_strategies
+                ]
         except Exception:
             owner_strategies = []
 

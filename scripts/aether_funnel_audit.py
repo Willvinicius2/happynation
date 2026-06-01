@@ -41,7 +41,47 @@ def main():
     for r in cur.fetchall():
         print(f"  {r['d']}: calls={r['n']} cost=${r['cost']:.4f}")
 
-    print("\n=== HIPOTESES POR CICLO ===")
+    print("\n=== SAUDE LLM (24h) ===")
+    cur = conn.execute("""
+        SELECT status, provider, model, transport, COUNT(*) AS n
+        FROM llm_traces
+        WHERE agent_role='hypothesis_generator' AND ts > datetime('now','-1 day')
+        GROUP BY status, provider, model, transport
+        ORDER BY n DESC
+    """)
+    for r in cur.fetchall():
+        print(f"  {r['status']}: {r['provider']}/{r['model']} via {r['transport']} = {r['n']}")
+    cur = conn.execute("""
+        SELECT error, COUNT(*) AS n
+        FROM llm_traces
+        WHERE agent_role='hypothesis_generator'
+          AND status='error'
+          AND ts > datetime('now','-1 day')
+        GROUP BY substr(error, 1, 140)
+        ORDER BY n DESC LIMIT 8
+    """)
+    for r in cur.fetchall():
+        err = " ".join(str(r["error"] or "?").split())[:160]
+        print(f"  erro {r['n']}x: {err}")
+
+    print("\n=== CICLOS DE PESQUISA (LLM/Web) ===")
+    cur = conn.execute("""
+        SELECT date(ts) AS d, COUNT(*) AS cycles,
+            COALESCE(SUM(json_extract(payload_json,'$.llm.created_hypotheses')),0) AS llm_h,
+            COALESCE(SUM(json_extract(payload_json,'$.llm.created_nodes')),0) AS llm_n,
+            COALESCE(SUM(json_extract(payload_json,'$.web.created_hypotheses')),0) AS web_h,
+            COALESCE(SUM(json_extract(payload_json,'$.web.created_nodes')),0) AS web_n,
+            SUM(CASE WHEN json_extract(payload_json,'$.llm.error') IS NOT NULL THEN 1 ELSE 0 END) AS llm_errors
+        FROM events WHERE type='research_completed' AND date(ts) > date('now','-7 days')
+        GROUP BY date(ts) ORDER BY d DESC
+    """)
+    for r in cur.fetchall():
+        print(
+            f"  {r['d']}: cycles={r['cycles']} llm_h={r['llm_h']} llm_nodes={r['llm_n']} "
+            f"web_h={r['web_h']} web_nodes={r['web_n']} llm_errors={r['llm_errors']}"
+        )
+
+    print("\n=== HIPOTESES LLM ACEITAS/REJEITADAS ===")
     cur = conn.execute("""
         SELECT date(ts) AS d, COUNT(*) AS cycles,
             COALESCE(SUM(json_extract(payload_json,'$.created')),0) AS created,
@@ -98,7 +138,7 @@ def main():
 
     print("\n=== TEMPO MEDIO entre ciclos do hypothesis_generator (ult 24h) ===")
     cur = conn.execute("""
-        SELECT ts FROM events WHERE type='llm_research_completed'
+        SELECT ts FROM events WHERE type='research_completed'
         AND ts > datetime('now','-1 day') ORDER BY ts ASC
     """)
     rows = cur.fetchall()

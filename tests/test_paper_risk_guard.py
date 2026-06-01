@@ -100,6 +100,31 @@ def test_plan_paper_buy_caps_to_position_limit_and_cash(tmp_path, monkeypatch):
     assert "ajustada" in reason
 
 
+def test_plan_paper_buy_uses_tier_override_as_target_notional(tmp_path, monkeypatch):
+    import src.modules.PaperBalanceLogger as paper
+
+    monkeypatch.setattr(paper, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(paper, "TRADES_CSV", tmp_path / "trades.csv")
+    monkeypatch.setattr(paper, "STATE_JSON", tmp_path / "state.json")
+    monkeypatch.setattr(paper, "SUMMARY_TXT", tmp_path / "summary.txt")
+    monkeypatch.setattr(paper, "MAX_POSITION_USD", 100.0)
+    monkeypatch.setattr(paper, "MAX_POSITION_PCT", 100.0)
+    monkeypatch.setattr(paper, "MAX_TOTAL_ALLOCATED_PCT", 100.0)
+    monkeypatch.setattr(paper, "MIN_CASH_RESERVE_USD", 0.0)
+
+    allowed, qty, reason = paper.plan_paper_buy(
+        "BTCUSDT",
+        "TierStrategy",
+        price=100.0,
+        requested_qty=1.0,
+        override_max_usd=225.0,
+    )
+
+    assert allowed is True
+    assert qty == 2.25
+    assert reason == ""
+
+
 def test_paused_strategies_refresh_existing_stats(tmp_path, monkeypatch):
     import src.modules.PaperBalanceLogger as paper
 

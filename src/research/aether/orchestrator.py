@@ -5,10 +5,12 @@ import json
 import math
 import os
 import re
+import sqlite3
 import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ from .config import DEFAULT_WORKERS, LEGACY_ROOT
 from .db import add_event, connect, dumps, get_setting, loads, set_setting
 from .llm_runtime import call_llm_agent
 from .llm_traces import record_llm_trace
+
 from .repository import (
     best_candidate_nodes,
     create_task,
@@ -43,6 +46,24 @@ EXPAND_SCORE_THRESHOLD = 0.42
 MAX_EXPAND_DEPTH = 6
 ACTIONABLE_RESEARCH_STATUSES = ("candidate", "promising", "expand", "queued", "running")
 RESCUE_TAG = "rescue_attempt"
+
+
+def _is_database_locked(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower()
+
+
+def _retry_on_database_locked(action, *, attempts: int = 5, delay_seconds: float = 1.5):
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return action()
+        except Exception as exc:
+            if not _is_database_locked(exc) or attempt >= attempts:
+                raise
+            last_exc = exc
+            time.sleep(delay_seconds * attempt)
+    if last_exc:
+        raise last_exc
 
 
 def _env_enabled(name: str, default: str = "0") -> bool:
@@ -1846,12 +1867,28 @@ def start_cycle_background(
                 # continuo (default True). Antes era False, o que deixava o
                 # ciclo idle quando _run_research_phase nao produzia nada novo.
                 _allow_gen = _env_enabled("AETHER_CONTINUOUS_ALLOW_GENERATE", "1")
-                queued = queue_scout_tasks(
-                    limit_nodes=effective_limit_nodes,
-                    probes_per_node=probes_per_node,
-                    allow_generate=_allow_gen,
-                    target_probe_count=target_probe_count,
-                )
+                try:
+                    queued = _retry_on_database_locked(
+                        lambda: queue_scout_tasks(
+                            limit_nodes=effective_limit_nodes,
+                            probes_per_node=probes_per_node,
+                            allow_generate=_allow_gen,
+                            target_probe_count=target_probe_count,
+                        ),
+                    )
+                except sqlite3.OperationalError as exc:
+                    if not _is_database_locked(exc):
+                        raise
+                    queued = 0
+                    with connect() as conn:
+                        add_event(
+                            conn,
+                            type="cycle_database_busy",
+                            agent_role="chief_orchestrator",
+                            message="SQLite ocupado; ciclo vai tentar novamente sem encerrar a pesquisa.",
+                        )
+                    _STOP_EVENT.wait(idle_seconds)
+                    continue
                 with connect() as conn:
                     set_agent_status(
                         conn,

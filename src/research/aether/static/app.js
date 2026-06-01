@@ -1451,6 +1451,7 @@ let _mindmapLoading = false;
 let _mindmapLastFetch = 0;
 let _agentsGraphLast = null;
 let _agentsGraphSelectedId = null;
+let _agentsGraphPassingSelected = false;
 const MINDMAP_MIN_INTERVAL_MS = 6000;
 
 function _waitForVis(retries = 30) {
@@ -1469,12 +1470,13 @@ function renderMindmapFocus(res) {
   if (!panel) return;
   const focus = res.focus || [];
   if (!focus.length) {
+    const recent = res.stats?.recent_events || 0;
     panel.innerHTML = `
       <div class="graphFocusHead">
         <span>Trabalho agora</span>
-        <strong>standby</strong>
+        <strong>sem tarefa ativa</strong>
       </div>
-      <div class="graphFocusEmpty">Nenhum agente trabalhando agora.</div>
+      <div class="graphFocusEmpty">Sem tarefa ativa neste instante. Eventos recentes continuam chegando no pipeline (${escapeHtml(recent)} no recorte atual).</div>
     `;
     return;
   }
@@ -1498,6 +1500,7 @@ function renderMindmapFocus(res) {
 
   for (const item of panel.querySelectorAll(".graphFocusItem")) {
     item.addEventListener("click", () => {
+      _agentsGraphPassingSelected = false;
       const graphId = item.dataset.graph;
       const rawNodeId = item.dataset.node;
       if (_agentsNetwork && graphId) {
@@ -1600,6 +1603,56 @@ function renderTaskDetail(task) {
   `;
 }
 
+function renderStrategyDetail(strategy) {
+  if (!strategy) return `<div class="graphDetailBlock"><div class="graphDetailText">Sem estrategia selecionada.</div></div>`;
+  const params = strategy.params && typeof strategy.params === "object"
+    ? Object.entries(strategy.params).slice(0, 6).map(([k, v]) => `${k}=${v}`).join(", ")
+    : "";
+  return `
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Estrategia passando</div>
+      <div class="graphDetailText"><strong>${escapeHtml(strategy.name || strategy.node_id || "-")}</strong></div>
+      <div class="graphDetailText">${escapeHtml(strategy.node_id || "-")}</div>
+    </div>
+    <div class="graphDetailBlock">
+      <div class="graphDetailGrid">
+        ${detailMetric("status", strategy.readiness || strategy.status || "-")}
+        ${detailMetric("agente", strategy.agent_role || "-")}
+        ${detailMetric("asset", strategy.asset || "-")}
+        ${detailMetric("engine", strategy.engine || "-")}
+        ${detailMetric("timeframe", strategy.timeframe || "-")}
+        ${detailMetric("score", shortNumber(strategy.score, 3))}
+        ${detailMetric("PnL", shortNumber(strategy.pnl_pct, 2, "%"))}
+        ${detailMetric("Sharpe", shortNumber(strategy.sharpe, 2))}
+        ${detailMetric("Trades", strategy.trade_count ?? "-")}
+        ${detailMetric("MDD", shortNumber(strategy.mdd_pct, 2, "%"))}
+      </div>
+    </div>
+    ${params ? `
+      <div class="graphDetailBlock">
+        <div class="graphDetailLabel">Parametros</div>
+        <div class="graphDetailText">${escapeHtml(params)}</div>
+      </div>
+    ` : ""}
+    ${strategy.hypothesis ? `
+      <div class="graphDetailBlock">
+        <div class="graphDetailLabel">Hipotese</div>
+        <div class="graphDetailText">${escapeHtml(shortText(strategy.hypothesis, 260))}</div>
+      </div>
+    ` : ""}
+    ${strategy.causal_mechanism ? `
+      <div class="graphDetailBlock">
+        <div class="graphDetailLabel">Mecanismo</div>
+        <div class="graphDetailText">${escapeHtml(shortText(strategy.causal_mechanism, 260))}</div>
+      </div>
+    ` : ""}
+    <div class="graphDetailBlock">
+      <div class="graphDetailLabel">Deploy</div>
+      <div class="graphDetailText">${escapeHtml(strategy.deployed ? "ja ativo no bot" : (strategy.deploy_blocker || "pronto para selecao"))}</div>
+    </div>
+  `;
+}
+
 function renderAgentsGraphDetail(graphNode) {
   const panel = $("agentsGraphDetail");
   if (!panel) return;
@@ -1624,6 +1677,17 @@ function renderAgentsGraphDetail(graphNode) {
         <strong>${escapeHtml(shortText(task.node_name || task.id || "Detalhe", 44))}</strong>
       </div>
       ${renderTaskDetail(task)}
+    `;
+    return;
+  }
+  if (detail.kind === "strategy") {
+    const strategy = detail.strategy || {};
+    panel.innerHTML = `
+      <div class="graphDetailHead">
+        <span>${escapeHtml(strategy.readiness || "estrategia")}</span>
+        <strong>${escapeHtml(shortText(strategy.name || strategy.node_id || "Estrategia", 44))}</strong>
+      </div>
+      ${renderStrategyDetail(strategy)}
     `;
     return;
   }
@@ -1705,6 +1769,89 @@ function updateAgentsGraphData(res) {
       if (_agentsNetwork) _agentsNetwork.setOptions({ physics: { enabled: false } });
     }, 650);
   }
+  if (_agentsGraphPassingSelected) {
+    const ids = _agentsNetData.nodes.get()
+      .filter((node) => {
+        const id = String(node.id || "");
+        return id.startsWith("passing::") || id.startsWith("stage::generated::");
+      })
+      .map((node) => node.id);
+    if (ids.length) _agentsNetwork.selectNodes(ids);
+  }
+}
+
+function updatePassingSelector(res) {
+  const btn = $("agentMapSelectPassingBtn");
+  const label = $("agentMapPassingLabel");
+  const strategies = res?.strategies || [];
+  if (label) {
+    const deployed = strategies.filter((item) => item.deployed).length;
+    label.textContent = strategies.length
+      ? `${strategies.length} passando / ${deployed} ativas no bot`
+      : "nenhuma estrategia passando agora";
+  }
+  if (btn) {
+    btn.disabled = !strategies.length;
+    btn.classList.toggle("active", _agentsGraphPassingSelected);
+  }
+}
+
+function updateStageRail(res) {
+  const counts = res?.stats?.stage_counts || {};
+  const pairs = [
+    ["agentStageHypothesis", counts.hypothesis],
+    ["agentStageScout", counts.scout],
+    ["agentStageValidation", counts.validation],
+    ["agentStageCritic", counts.critic],
+    ["agentStageDeploy", counts.deploy],
+  ];
+  for (const [id, value] of pairs) {
+    const el = $(id);
+    if (el) el.textContent = value ?? 0;
+  }
+}
+
+function renderPipelineSignals(res) {
+  const panel = $("agentPipelineSignals");
+  if (!panel) return;
+  const signals = res?.stats?.signals || [];
+  if (!signals.length) {
+    panel.innerHTML = `<div class="pipelineSignal standby"><span>Fluxo</span><strong>sem gargalo visivel</strong><small>pesquisador aguardando proximo evento</small></div>`;
+    return;
+  }
+  panel.innerHTML = signals.slice(0, 4).map((item) => `
+    <button class="pipelineSignal ${escapeHtml(item.level || "standby")}" type="button" data-node="${escapeHtml(item.node_id || "")}">
+      <span>${escapeHtml(item.label || "Sinal")}</span>
+      <strong>${escapeHtml(item.value || "-")}</strong>
+      <small>${escapeHtml(shortText(item.detail || "", 86))}</small>
+    </button>
+  `).join("");
+  for (const item of panel.querySelectorAll(".pipelineSignal")) {
+    item.addEventListener("click", () => {
+      const rawNodeId = item.dataset.node;
+      if (!rawNodeId || !state.data) return;
+      state.selected = rawNodeId;
+      const node = state.data.nodes.find((candidate) => candidate.id === rawNodeId);
+      if (node) renderDetails(node);
+    });
+  }
+}
+
+function selectPassingStrategies() {
+  if (!_agentsNetwork || !_agentsNetData) return;
+  const ids = _agentsNetData.nodes.get()
+    .filter((node) => {
+      const id = String(node.id || "");
+      return id.startsWith("passing::") || id.startsWith("stage::generated::");
+    })
+    .map((node) => node.id);
+  if (!ids.length) return;
+  _agentsGraphPassingSelected = true;
+  _agentsNetwork.selectNodes(ids);
+  _agentsNetwork.fit({ nodes: ids, animation: { duration: 450, easingFunction: "easeOutCubic" } });
+  const selected = _agentsNetData.nodes.get(ids[ids.length - 1]);
+  renderAgentsGraphDetail(selected);
+  updatePassingSelector(_agentsGraphLast);
 }
 
 async function refreshMindmap(force = false) {
@@ -1724,21 +1871,29 @@ async function refreshMindmap(force = false) {
     const res = await api("/api/agents_graph?limit_per_agent=4");
     _agentsGraphLast = res;
     const stats = $("agentsGraphStats");
-    if (stats) stats.textContent = `${res.stats?.nodes || 0} nodes · ${res.stats?.edges || 0} edges`;
-
     const graphStats = res.stats || {};
+    if ($("agentMapAgents")) $("agentMapAgents").textContent = graphStats.agents || 0;
+    if ($("agentMapRunning")) $("agentMapRunning").textContent = graphStats.running_agents || 0;
+    if ($("agentMapQueued")) $("agentMapQueued").textContent = graphStats.queued_tasks || 0;
+    if ($("agentMapPassing")) $("agentMapPassing").textContent = graphStats.passing_strategies || 0;
+    if ($("agentMapUpdated")) $("agentMapUpdated").textContent = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    updatePassingSelector(res);
+    updateStageRail(res);
+    renderPipelineSignals(res);
     if (stats) {
       stats.textContent = [
         `${graphStats.agents || 0} agentes`,
         `${graphStats.running_agents || 0} rodando`,
         `${graphStats.running_tasks || 0} tarefas`,
         `${graphStats.queued_tasks || 0} na fila`,
-        `${graphStats.work_items || 0} itens de trabalho`,
+        `${graphStats.passing_strategies || 0} passando`,
+        `${graphStats.work_items || 0} blocos de trabalho`,
       ].join(" / ");
     }
     renderMindmapFocus(res);
-    if (!_agentsGraphSelectedId && (res.focus || []).length) {
-      _agentsGraphSelectedId = res.focus[0].graph_node_id;
+    if (!_agentsGraphSelectedId) {
+      const generated = (res.nodes || []).find((node) => String(node.id || "").startsWith("stage::generated::"));
+      _agentsGraphSelectedId = graphStats.selected_graph_id || generated?.id || ((res.focus || [])[0] || {}).graph_node_id || null;
     }
 
     if (_agentsNetwork && _agentsNetData) {
@@ -1749,12 +1904,6 @@ async function refreshMindmap(force = false) {
       } else {
         renderAgentsGraphDetail(null);
       }
-      _mindmapLoading = false;
-      return;
-      // update incremental: setData re-estabiliza, evite chamar a cada refresh
-      _agentsNetData.nodes.update(res.nodes || []);
-      _agentsNetData.edges.clear();
-      _agentsNetData.edges.add(res.edges || []);
       _mindmapLoading = false;
       return;
     }
@@ -1772,19 +1921,31 @@ async function refreshMindmap(force = false) {
         enabled: true,
         solver: "forceAtlas2Based",
         forceAtlas2Based: {
-          gravitationalConstant: -55,
-          centralGravity: 0.012,
-          springLength: 130,
-          springConstant: 0.05,
-          damping: 0.7,
-          avoidOverlap: 0.55,
+          gravitationalConstant: -70,
+          centralGravity: 0.018,
+          springLength: 175,
+          springConstant: 0.045,
+          damping: 0.74,
+          avoidOverlap: 0.85,
         },
-        stabilization: { enabled: true, iterations: 60, updateInterval: 25, fit: true },
-        timestep: 0.5,
+        stabilization: { enabled: true, iterations: 75, updateInterval: 25, fit: true },
+        timestep: 0.45,
       },
-      interaction: { hover: true, tooltipDelay: 150, dragNodes: true, zoomView: true, dragView: true, navigationButtons: false },
-      nodes: { borderWidth: 2, shadow: { enabled: true, color: "rgba(0,0,0,0.5)", size: 8, x: 0, y: 2 } },
-      edges: { smooth: { enabled: true, type: "continuous", roundness: 0.3 }, arrows: { to: false } },
+      interaction: { hover: true, tooltipDelay: 120, dragNodes: true, zoomView: true, dragView: true, navigationButtons: false, multiselect: false },
+      nodes: {
+        borderWidth: 2,
+        margin: { top: 11, right: 14, bottom: 11, left: 14 },
+        shapeProperties: { borderRadius: 16 },
+        font: { face: "Inter, system-ui, Segoe UI, sans-serif", color: "#e0f2fe", multi: true },
+        shadow: { enabled: true, color: "rgba(34,211,238,0.18)", size: 18, x: 0, y: 6 },
+      },
+      edges: {
+        smooth: { enabled: true, type: "cubicBezier", forceDirection: "horizontal", roundness: 0.45 },
+        arrows: { to: { enabled: true, scaleFactor: 0.55, type: "arrow" } },
+        color: { color: "#38bdf8", opacity: 0.45 },
+        width: 2,
+        shadow: { enabled: true, color: "rgba(34,211,238,.28)", size: 8, x: 0, y: 0 },
+      },
       layout: { improvedLayout: true },
     };
     _agentsNetwork = new vis.Network(container, _agentsNetData, options);
@@ -1795,6 +1956,7 @@ async function refreshMindmap(force = false) {
     });
     _agentsNetwork.on("click", (params) => {
       if (params.nodes && params.nodes.length) {
+        _agentsGraphPassingSelected = false;
         const nid = params.nodes[0];
         const selected = _agentsNetData.nodes.get(nid);
         _agentsGraphSelectedId = nid;
@@ -1806,6 +1968,7 @@ async function refreshMindmap(force = false) {
         }
         const fixed = selected?.fixed === true;
         _agentsNetData.nodes.update({ id: nid, fixed: !fixed });
+        updatePassingSelector(_agentsGraphLast);
       }
     });
     if (_agentsGraphSelectedId) {
@@ -1983,6 +2146,7 @@ $("manifestBtn").onclick = async () => {
 $("treeViewBtn").onclick = () => { state.viewMode = "tree"; window.location.hash = ""; syncViewMode(); };
 $("mindmapViewBtn").onclick = () => { state.viewMode = "mindmap"; window.location.hash = "mindmap"; syncViewMode(); };
 $("rankingViewBtn").onclick = () => { state.viewMode = "ranking"; window.location.hash = "ranking"; syncViewMode(); };
+if ($("agentMapSelectPassingBtn")) $("agentMapSelectPassingBtn").onclick = () => selectPassingStrategies();
 for (const btn of document.querySelectorAll("[data-ranking-tab]")) {
   btn.addEventListener("click", () => setRankingTab(btn.dataset.rankingTab));
 }

@@ -16,7 +16,7 @@ src/
   research/               catalogo, validacao, descoberta e Aether
   backtesting/            helper compartilhado de backtest
   database/               configs JSON pequenas
-  static/                 dashboards HTML estaticos
+  static/                 dashboards HTML estaticos (ex.: trade_dashboard.html)
   logs/                   estado/runtime gerado; nao tratar como codigo
 scripts/                  tarefas manuais e automacoes de pesquisa
 tests/                    suite pytest

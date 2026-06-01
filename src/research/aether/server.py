@@ -25,6 +25,7 @@ from .llm_hypothesis import create_llm_hypothesis_batch
 from .llm_runtime import llm_status
 from .llm_traces import list_llm_traces
 from .manifest import generate_manifest
+from .auto_deploy import DEFAULT_RISK
 from .orchestrator import (
     bootstrap,
     cycle_mode,
@@ -70,7 +71,7 @@ app.add_middleware(
 @app.middleware("http")
 async def no_cache_ui(request, call_next):
     response = await call_next(request)
-    if request.url.path == "/" or request.url.path.startswith(("/api/", "/static/")):
+    if request.url.path in {"/", "/pet"} or request.url.path.startswith(("/api/", "/static/")):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -122,7 +123,7 @@ def _active_record_from_node(conn, ranking_row: dict) -> tuple[dict | None, str 
         return None, "sem simbolo no best_probe"
     record = {
         "id": _active_id(node_id, engine, params, symbol, timeframe),
-        "source": "aether",
+        "source": "aether_manual_ranking_deploy",
         "node_id": node_id,
         "campaign_id": row["campaign_id"],
         "engine": engine,
@@ -145,11 +146,7 @@ def _active_record_from_node(conn, ranking_row: dict) -> tuple[dict | None, str 
             "critic_reason": metrics.get("critic_reason"),
             "best_probe": best,
         },
-        "risk": {
-            "take_profit_pct": None,
-            "stop_loss_pct": None,
-            "max_hold_candles": None,
-        },
+        "risk": dict(DEFAULT_RISK),
     }
     return record, None
 
@@ -166,6 +163,11 @@ def _deploy_record_uncapped(record: dict) -> dict:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(static_dir() / "index.html")
+
+
+@app.get("/pet")
+def pet() -> FileResponse:
+    return FileResponse(static_dir() / "pet.html")
 
 
 @app.get("/api/state")
@@ -471,6 +473,7 @@ def api_deploy_ranking(
     max_deploy: int = Query(default=50, ge=1, le=150),
     include_needs_validation: bool = Query(default=False),
     dedupe: bool = Query(default=True),
+    force: bool = Query(default=False),
 ) -> dict:
     with connect() as conn:
         campaign_v = get_active_campaign_id(conn) if campaign_id == "active" else campaign_id
@@ -489,6 +492,10 @@ def api_deploy_ranking(
         deployed = []
         skipped = []
         for ranking_row in eligible:
+            deploy_blocker = str(ranking_row.get("deploy_blocker") or "")
+            if deploy_blocker and not deploy_blocker.startswith("Aguardando") and not force:
+                skipped.append({"node_id": ranking_row.get("node_id"), "reason": deploy_blocker})
+                continue
             record, reason = _active_record_from_node(conn, ranking_row)
             if reason or record is None:
                 skipped.append({"node_id": ranking_row.get("node_id"), "reason": reason or "registro invalido"})
@@ -504,6 +511,7 @@ def api_deploy_ranking(
                 "deployed": len(deployed),
                 "skipped": skipped,
                 "include_needs_validation": include_needs_validation,
+                "force": force,
                 "ranking_reset": reset,
             },
         )

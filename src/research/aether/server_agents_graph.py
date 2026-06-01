@@ -7,7 +7,8 @@ from typing import Any
 
 from .campaigns import get_active_campaign_id
 from .db import connect, loads
-from .repository import ensure_agents
+from .ranking import build_strategy_ranking
+from .repository import AGENT_DEFINITIONS
 
 
 AGENT_COLORS = {
@@ -74,7 +75,7 @@ STATUS_COLORS = {
 
 
 def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
-    """Build a graph that only shows agents and their current work."""
+    """Build a graph that shows strategy nodes plus agent work."""
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
@@ -125,6 +126,12 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
 
     def event_graph_id(role: str, event_id: object) -> str:
         return f"last::{role}::{event_id}"
+
+    def stage_graph_id(node_id: str, stage: str) -> str:
+        return f"stage::{stage}::{node_id}"
+
+    def passing_graph_id(node_id: str) -> str:
+        return f"passing::{node_id}"
 
     def status_colors(status: str) -> tuple[str, str]:
         return STATUS_COLORS.get(status, STATUS_COLORS["standby"])
@@ -179,25 +186,30 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
                 out[row["id"]] = item
         return out
 
-    add_node(
-        "__root__",
-        "Aether\nAgentes",
-        color=color_obj("#fbbf24", "#f8fafc", "#fde68a"),
-        size=42,
-        font={"size": 20, "color": "#111827", "face": "system-ui"},
-        shape="star",
-        borderWidth=3,
-    )
-
     focus: list[dict[str, Any]] = []
+    passing_strategies: list[dict[str, Any]] = []
 
     with connect() as conn:
         campaign_id = get_active_campaign_id(conn)
-        ensure_agents(conn)
 
         agent_rows = [row_dict(row) for row in conn.execute("SELECT * FROM agents ORDER BY kind, role").fetchall()]
         for agent in agent_rows:
             agent["stats"] = loads(agent.pop("stats_json"), {})
+        known_agent_roles = {str(agent.get("role")) for agent in agent_rows}
+        for role, label, kind, timeframe in AGENT_DEFINITIONS:
+            if role not in known_agent_roles:
+                agent_rows.append(
+                    {
+                        "role": role,
+                        "label": label,
+                        "kind": kind,
+                        "timeframe": timeframe,
+                        "status": "standby",
+                        "current_task_id": None,
+                        "stats": {},
+                        "updated_at": "",
+                    }
+                )
 
         task_rows: list[dict[str, Any]] = []
         for row in conn.execute(
@@ -233,6 +245,23 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
             *(str(task.get("node_id")) for task in task_rows if task.get("node_id")),
             *(str(event.get("node_id")) for event in event_rows if event.get("node_id")),
         }
+        try:
+            passing_strategies = [
+                row
+                for row in build_strategy_ranking(
+                    conn,
+                    starting_capital=1000.0,
+                    limit=80,
+                    campaign_id=campaign_id,
+                    dedupe=True,
+                    include_deployed=True,
+                    hide_blocked=False,
+                )
+                if row.get("readiness") == "paper_ready"
+            ]
+            node_ids.update(str(row.get("node_id")) for row in passing_strategies if row.get("node_id"))
+        except Exception:
+            passing_strategies = []
         node_map = load_node_summaries(conn, node_ids)
 
     def compact_probe(probe: dict[str, Any]) -> dict[str, Any]:
@@ -259,6 +288,72 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
             "best_engine": best.get("engine"),
             "best_symbol": best.get("symbol"),
         }
+
+    def best_probe(node: dict[str, Any]) -> dict[str, Any]:
+        metrics = node.get("metrics") if isinstance(node.get("metrics"), dict) else {}
+        best = metrics.get("best_probe") if isinstance(metrics.get("best_probe"), dict) else {}
+        if best:
+            return best
+        specs = metrics.get("probe_specs") if isinstance(metrics.get("probe_specs"), list) else []
+        for spec in specs:
+            if isinstance(spec, dict):
+                return spec
+        return {}
+
+    def params_text(params: Any, max_items: int = 3) -> str:
+        if not isinstance(params, dict) or not params:
+            return ""
+        parts = []
+        for key, value in list(params.items())[:max_items]:
+            if key == "specs" and isinstance(value, list):
+                engines = []
+                for spec in value:
+                    if isinstance(spec, dict) and spec.get("engine"):
+                        engines.append(str(spec.get("engine")))
+                if engines:
+                    parts.append("+".join(dict.fromkeys(engines[:4])))
+                else:
+                    parts.append(f"{len(value)} specs")
+                continue
+            if isinstance(value, (dict, list, tuple)):
+                parts.append(f"{key}={len(value)} itens")
+                continue
+            parts.append(f"{key}={value}")
+        return ", ".join(parts)
+
+    def strategy_payload(row: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+        probe = best_probe(node)
+        metrics = node.get("metrics") if isinstance(node.get("metrics"), dict) else {}
+        return {
+            "node_id": row.get("node_id"),
+            "name": row.get("name"),
+            "status": row.get("status"),
+            "readiness": row.get("readiness"),
+            "score": row.get("score"),
+            "timeframe": row.get("timeframe"),
+            "agent_role": row.get("agent_role"),
+            "pnl_pct": row.get("pnl_pct"),
+            "sharpe": row.get("sharpe"),
+            "mdd_pct": row.get("mdd_pct"),
+            "trade_count": row.get("trade_count"),
+            "deployed": row.get("deployed"),
+            "deploy_blocker": row.get("deploy_blocker"),
+            "summary": row.get("summary"),
+            "hypothesis": node.get("hypothesis"),
+            "causal_mechanism": node.get("causal_mechanism"),
+            "mutation_from_parent": node.get("mutation_from_parent"),
+            "engine": probe.get("engine") or metrics.get("best_engine"),
+            "asset": probe.get("symbol") or metrics.get("best_symbol"),
+            "params": probe.get("params") if isinstance(probe.get("params"), dict) else {},
+            "critic_status": metrics.get("critic_status"),
+            "validation_stage": metrics.get("validation_stage"),
+        }
+
+    def fmt_num(value: Any, digits: int = 2, suffix: str = "") -> str:
+        try:
+            return f"{float(value):.{digits}f}{suffix}"
+        except (TypeError, ValueError):
+            return "-"
 
     def task_detail(task: dict[str, Any], *, role: str | None = None) -> dict[str, Any]:
         payload = task.get("payload") if isinstance(task.get("payload"), dict) else {}
@@ -303,11 +398,17 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
         tasks_by_agent[str(task.get("agent_role") or "unknown")].append(task)
 
     events_by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    events_by_node: dict[str, list[dict[str, Any]]] = defaultdict(list)
     event_counts: Counter[str] = Counter()
+    event_type_counts: Counter[str] = Counter()
     for event in event_rows:
         role = str(event.get("agent_role") or "system")
+        event_type = str(event.get("type") or "evento")
         events_by_agent[role].append(event)
         event_counts[role] += 1
+        event_type_counts[event_type] += 1
+        if event.get("node_id"):
+            events_by_node[str(event.get("node_id"))].append(event)
 
     known_roles = {str(agent.get("role")) for agent in agent_rows}
     for role in sorted(set(tasks_by_agent) | set(events_by_agent)):
@@ -335,6 +436,330 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
     running_tasks = sum(1 for task in task_rows if task.get("status") == "running")
     queued_tasks = sum(1 for task in task_rows if task.get("status") == "queued")
     work_items = 0
+    deployed_passing = sum(1 for row in passing_strategies if row.get("deployed"))
+    blocked_passing = sum(1 for row in passing_strategies if row.get("deploy_blocker"))
+    stage_counts = {
+        "hypothesis": sum(event_type_counts.get(key, 0) for key in ("hypothesis_created", "research_added", "llm_hypothesis")),
+        "scout": running_tasks + queued_tasks + event_type_counts.get("tasks_queued", 0),
+        "validation": sum(1 for row in passing_strategies if row.get("readiness") == "paper_ready"),
+        "critic": sum(
+            1
+            for row in passing_strategies
+            if (node_map.get(str(row.get("node_id") or ""), {}).get("metrics") or {}).get("critic_status") == "approved"
+        ),
+        "deploy": deployed_passing,
+        "blocked": blocked_passing,
+    }
+
+    def latest_event_matching(*tokens: str) -> dict[str, Any] | None:
+        lowered = tuple(token.lower() for token in tokens)
+        for event in event_rows:
+            text = " ".join(
+                str(event.get(key) or "")
+                for key in ("type", "message", "agent_role")
+            ).lower()
+            if any(token in text for token in lowered):
+                return event
+        return None
+
+    oldest_running_task = None
+    running_task_rows = [task for task in task_rows if task.get("status") == "running"]
+    if running_task_rows:
+        oldest_running_task = sorted(running_task_rows, key=lambda task: str(task.get("updated_at") or ""))[0]
+    latest_error = latest_event_matching("error", "failed", "falha", "exception")
+    latest_prune = latest_event_matching("pruned", "hard_deleted", "poda", "paused")
+    latest_deploy = latest_event_matching("deploy", "manifest", "ranking_deployed")
+    latest_critic = latest_event_matching("critic")
+
+    signals: list[dict[str, Any]] = []
+    if oldest_running_task:
+        signals.append(
+            {
+                "level": "running",
+                "label": "Mais antiga",
+                "value": short(oldest_running_task.get("task_type"), 24),
+                "detail": f"{oldest_running_task.get('agent_role') or '-'} desde {oldest_running_task.get('updated_at') or '-'}",
+                "node_id": oldest_running_task.get("node_id"),
+            }
+        )
+    if latest_error:
+        signals.append(
+            {
+                "level": "danger",
+                "label": "Ultimo erro",
+                "value": short(latest_error.get("type"), 24),
+                "detail": short(latest_error.get("message"), 92),
+                "node_id": latest_error.get("node_id"),
+            }
+        )
+    elif latest_prune:
+        signals.append(
+            {
+                "level": "warning",
+                "label": "Ultima poda",
+                "value": short(latest_prune.get("type"), 24),
+                "detail": short(latest_prune.get("message"), 92),
+                "node_id": latest_prune.get("node_id"),
+            }
+        )
+    if latest_critic:
+        signals.append(
+            {
+                "level": "quality",
+                "label": "Critic",
+                "value": short(latest_critic.get("type"), 24),
+                "detail": short(latest_critic.get("message"), 92),
+                "node_id": latest_critic.get("node_id"),
+            }
+        )
+    if latest_deploy:
+        signals.append(
+            {
+                "level": "deploy",
+                "label": "Deploy",
+                "value": short(latest_deploy.get("type"), 24),
+                "detail": short(latest_deploy.get("message"), 92),
+                "node_id": latest_deploy.get("node_id"),
+            }
+        )
+
+    selected_strategy = passing_strategies[0] if passing_strategies else None
+    root_kwargs: dict[str, Any] = {}
+    if selected_strategy:
+        root_kwargs = {"x": 650, "y": 150, "fixed": {"x": True, "y": True}, "physics": False}
+    add_node(
+        "__root__",
+        "AETHER\nAGENTES",
+        color=color_obj("#0f172a", "#67e8f9", "#1e293b"),
+        shape="box",
+        size=28,
+        widthConstraint={"minimum": 150, "maximum": 190},
+        margin={"top": 14, "right": 16, "bottom": 14, "left": 16},
+        font={"size": 14, "color": "#e0f2fe", "face": "system-ui"},
+        borderWidth=3,
+        shadow={"enabled": True, "color": "#22d3ee", "size": 18, "x": 0, "y": 4},
+        **root_kwargs,
+    )
+    if selected_strategy:
+        node_id = str(selected_strategy.get("node_id") or "")
+        node = node_map.get(node_id, {})
+        strategy = strategy_payload(selected_strategy, node)
+        family = short(str(strategy.get("name") or "estrategia").split("/")[0].strip(), 26)
+        engine = strategy.get("engine") or selected_strategy.get("code") or "engine"
+        asset = strategy.get("asset") or "-"
+        params = params_text(strategy.get("params"))
+        agent_role = str(strategy.get("agent_role") or node.get("agent_role") or "")
+        agent_label = DISPLAY_NAMES.get(agent_role, agent_role.replace("_", " ").title() if agent_role else "-")
+        passing_detail = {"kind": "strategy", "strategy": strategy}
+        stage_style = {
+            "shape": "box",
+            "widthConstraint": {"minimum": 170, "maximum": 220},
+            "margin": {"top": 14, "right": 15, "bottom": 14, "left": 15},
+            "font": {"size": 12, "color": "#dbeafe", "face": "system-ui"},
+            "borderWidth": 2,
+            "fixed": {"x": True, "y": True},
+            "physics": False,
+            "researchPassing": True,
+            "rawNodeId": node_id,
+            "detail": passing_detail,
+        }
+        stage_nodes = [
+            (
+                "family",
+                -560,
+                -90,
+                f"Familia\n{family}\norigem {short(selected_strategy.get('source_bucket') or 'aether', 16)}",
+                "#10172a",
+                "#8b5cf6",
+            ),
+            (
+                "engine",
+                -330,
+                -105,
+                f"Engine\n{short(engine, 28)}\nagente {short(agent_label, 18)}",
+                "#082033",
+                "#38bdf8",
+            ),
+            (
+                "indicators",
+                -100,
+                -40,
+                f"Indicadores\n{short(engine, 24)}\n{short(params or asset, 28)}",
+                "#071726",
+                "#38bdf8",
+            ),
+            (
+                "entry",
+                140,
+                -95,
+                f"Entrada\nscore {fmt_num(strategy.get('score'), 2)} - trades {strategy.get('trade_count') or '-'}\nPnL {fmt_num(strategy.get('pnl_pct'), 1, '%')}",
+                "#071426",
+                "#60a5fa",
+            ),
+            (
+                "exit",
+                140,
+                80,
+                f"Saida\ncritic {short(strategy.get('critic_status') or 'approved', 14)}\nSharpe {fmt_num(strategy.get('sharpe'), 2)}",
+                "#160d1f",
+                "#ec4899",
+            ),
+            (
+                "risk",
+                -90,
+                115,
+                f"Gestao\nMDD {fmt_num(strategy.get('mdd_pct'), 1, '%')}\n{short(strategy.get('deploy_blocker') or 'sem bloqueio', 30)}",
+                "#10132a",
+                "#8b5cf6",
+            ),
+            (
+                "generated",
+                390,
+                -10,
+                f"Estrategia gerada\n{short(node_id, 30)}\nScore {fmt_num(strategy.get('score'), 2)}",
+                "#0b2942",
+                "#22d3ee",
+            ),
+        ]
+        for stage, x, y, label, bg, border in stage_nodes:
+            add_node(
+                stage_graph_id(node_id, stage),
+                label,
+                x=x,
+                y=y,
+                color=color_obj(bg, border),
+                shadow={"enabled": stage == "generated", "color": border, "size": 20, "x": 0, "y": 4},
+                **stage_style,
+            )
+        flow_edges = [
+            ("family", "engine"),
+            ("engine", "indicators"),
+            ("indicators", "entry"),
+            ("entry", "generated"),
+            ("family", "risk"),
+            ("risk", "exit"),
+            ("exit", "generated"),
+        ]
+        for source, target in flow_edges:
+            add_edge(
+                stage_graph_id(node_id, source),
+                stage_graph_id(node_id, target),
+                color={"color": "#60a5fa", "opacity": 0.78},
+                width=3,
+                smooth={"enabled": True, "type": "cubicBezier", "roundness": 0.45},
+                arrows={"to": {"enabled": True, "scaleFactor": 0.6}},
+            )
+
+        agent_tasks = tasks_by_agent.get(agent_role, [])
+        recent_node_events = events_by_node.get(node_id, [])[:3] or events_by_agent.get(agent_role, [])[:3]
+        add_node(
+            stage_graph_id(node_id, "agent_work"),
+            f"Trabalho do agente\n{short(agent_label, 24)}\n{len(agent_tasks)} tarefas ativas",
+            x=-340,
+            y=130,
+            color=color_obj("#071b2b", AGENT_COLORS.get(agent_role, "#38bdf8")),
+            shape="box",
+            widthConstraint={"minimum": 190, "maximum": 230},
+            margin={"top": 12, "right": 14, "bottom": 12, "left": 14},
+            font={"size": 12, "color": "#dbeafe", "face": "system-ui"},
+            borderWidth=2,
+            fixed={"x": True, "y": True},
+            physics=False,
+            rawNodeId=node_id,
+            researchPassing=True,
+            detail={
+                "kind": "agent",
+                "role": agent_role,
+                "label": agent_label,
+                "agent_kind": "research_worker",
+                "timeframe": strategy.get("timeframe"),
+                "status": "running" if agent_tasks else "standby",
+                "current_task_id": agent_tasks[0].get("id") if agent_tasks else None,
+                "updated_at": node.get("updated_at"),
+                "stats": {"bubble": strategy.get("summary") or "Estrategia passando no pesquisador."},
+                "tasks": [task_detail(task, role=agent_role) for task in agent_tasks[:4]],
+                "recent_events": [
+                    {"ts": event.get("ts"), "type": event.get("type"), "message": event.get("message")}
+                    for event in recent_node_events
+                ],
+            },
+        )
+        add_edge(
+            stage_graph_id(node_id, "engine"),
+            stage_graph_id(node_id, "agent_work"),
+            color={"color": AGENT_COLORS.get(agent_role, "#38bdf8"), "opacity": 0.72},
+            width=2,
+            label="trabalho",
+            dashes=True,
+            font={"size": 10, "color": "#93c5fd", "face": "system-ui", "strokeWidth": 3, "strokeColor": "#06111f"},
+        )
+        for index, event in enumerate(recent_node_events[:2]):
+            event_type = str(event.get("type") or "evento")
+            e_bg, e_border = event_color(event_type)
+            ev_id = f"strategy_event::{node_id}::{event.get('id') or index}"
+            add_node(
+                ev_id,
+                f"Ultima acao\n{short(event_type.replace('_', ' '), 24)}\n{short(event.get('ts'), 19)}",
+                x=-560 + index * 210,
+                y=245,
+                color=color_obj(e_bg, e_border),
+                shape="box",
+                widthConstraint={"minimum": 170, "maximum": 210},
+                margin={"top": 10, "right": 12, "bottom": 10, "left": 12},
+                font={"size": 10, "color": "#cbd5e1", "face": "system-ui"},
+                borderWidth=2,
+                fixed={"x": True, "y": True},
+                physics=False,
+                rawNodeId=node_id,
+                researchPassing=True,
+                kind="last_action",
+                detail={
+                    "kind": "event",
+                    "agent": agent_label,
+                    "role": agent_role,
+                    "event": {
+                        "ts": event.get("ts"),
+                        "type": event_type,
+                        "message": event.get("message"),
+                        "target": node_summary(node_id, node_map),
+                    },
+                },
+            )
+            add_edge(stage_graph_id(node_id, "agent_work"), ev_id, color={"color": e_border, "opacity": 0.45}, width=1, dashes=True)
+
+        passing_y = 380
+        for index, row in enumerate(passing_strategies[:16]):
+            pid = str(row.get("node_id") or "")
+            pnode = node_map.get(pid, {})
+            pstrategy = strategy_payload(row, pnode)
+            col = index % 8
+            line = index // 8
+            add_node(
+                passing_graph_id(pid),
+                f"PASSANDO\n{short(row.get('name'), 24)}\nPnL {fmt_num(row.get('pnl_pct'), 0, '%')} - Sh {fmt_num(row.get('sharpe'), 2)}",
+                x=-650 + col * 185,
+                y=passing_y + line * 105,
+                color=color_obj("#0b1f2f", "#22c55e", "#123923"),
+                shape="box",
+                size=15,
+                widthConstraint={"minimum": 155, "maximum": 180},
+                margin={"top": 10, "right": 11, "bottom": 10, "left": 11},
+                font={"size": 10, "color": "#dcfce7", "face": "system-ui"},
+                borderWidth=2,
+                fixed={"x": True, "y": True},
+                physics=False,
+                rawNodeId=pid,
+                researchPassing=True,
+                kind="strategy",
+                detail={"kind": "strategy", "strategy": pstrategy},
+            )
+            add_edge(
+                stage_graph_id(node_id, "generated"),
+                passing_graph_id(pid),
+                color={"color": "#22c55e", "opacity": 0.24},
+                width=1,
+                dashes=True,
+            )
 
     for agent in agent_rows:
         role = str(agent.get("role") or "unknown")
@@ -360,13 +785,15 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
 
         add_node(
             agent_id(role),
-            f"{short(label, 16)}\n{STATUS_LABELS.get(status, status.upper())}\n{len(agent_tasks)} tarefas",
-            color=color_obj(bg, "#f8fafc" if active else border),
-            shape="dot",
-            size=34 if active else 29 if queued else 23,
-            borderWidth=5 if active else 4 if queued else 2,
-            font={"size": 12, "color": "#f8fafc", "face": "system-ui"},
-            shadow={"enabled": bool(active or queued), "color": color, "size": 24 if active else 16, "x": 0, "y": 0},
+            f"{short(label, 16)}\n{STATUS_LABELS.get(status, status.upper())} · {len(agent_tasks)} tarefas",
+            color=color_obj(bg, "#67e8f9" if active else border),
+            shape="box",
+            size=28 if active else 24 if queued else 20,
+            widthConstraint={"minimum": 150, "maximum": 190},
+            margin={"top": 12, "right": 14, "bottom": 12, "left": 14},
+            borderWidth=4 if active else 3 if queued else 2,
+            font={"size": 13, "color": "#f8fafc", "face": "system-ui", "bold": {"color": "#ffffff"}},
+            shadow={"enabled": True, "color": color if (active or queued) else "rgba(34,211,238,.25)", "size": 26 if active else 18 if queued else 10, "x": 0, "y": 4},
             kind="agent",
             detail={
                 "kind": "agent",
@@ -409,13 +836,15 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
             work_items += 1
             add_node(
                 graph_id,
-                f"{task_label}\n{short(task.get('task_type'), 22)}\n{short(target or task_id, 32)}",
+                f"{task_label}\n{short(task.get('task_type'), 24)}\n{short(target or task_id, 34)}",
                 color=color_obj(t_bg, t_border),
                 shape="box",
-                size=25 if task_status == "running" else 19,
-                borderWidth=5 if task_status == "running" else 3,
+                size=24 if task_status == "running" else 19,
+                widthConstraint={"minimum": 175, "maximum": 230},
+                margin={"top": 11, "right": 14, "bottom": 11, "left": 14},
+                borderWidth=4 if task_status == "running" else 2,
                 font={"size": 11, "color": "#e2e8f0", "face": "system-ui"},
-                shadow={"enabled": task_status == "running", "color": t_border, "size": 22, "x": 0, "y": 0},
+                shadow={"enabled": True, "color": t_border, "size": 22 if task_status == "running" else 9, "x": 0, "y": 4},
                 rawNodeId=node_id,
                 kind="work",
                 detail={"kind": "work", "agent": agent.get("label") or role, "task": task_detail(task, role=role)},
@@ -433,8 +862,9 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
                 graph_id,
                 color={"color": t_border, "opacity": 0.9 if task_status == "running" else 0.62},
                 width=5 if task_status == "running" else 3,
-                label="agora" if task_status == "running" else "fila",
-                font={"size": 10, "color": t_border, "face": "system-ui"},
+                label="fluxo vivo" if task_status == "running" else "fila",
+                font={"size": 10, "color": t_border, "face": "system-ui", "strokeWidth": 3, "strokeColor": "#06111f"},
+                smooth={"enabled": True, "type": "cubicBezier", "roundness": 0.42},
                 dashes=task_status != "running",
             )
             focus.append(
@@ -495,5 +925,23 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
         "queued_tasks": queued_tasks,
         "work_items": work_items,
         "recent_events": sum(event_counts.values()),
+        "passing_strategies": len(passing_strategies),
+        "deployed_passing": deployed_passing,
+        "blocked_passing": blocked_passing,
+        "stage_counts": stage_counts,
+        "signals": signals[:4],
+        "selected_node_id": selected_strategy.get("node_id") if selected_strategy else None,
+        "selected_graph_id": stage_graph_id(str(selected_strategy.get("node_id") or ""), "generated") if selected_strategy else None,
     }
-    return {"ok": True, "nodes": nodes, "edges": edges, "focus": focus[:20], "stats": stats}
+    return {
+        "ok": True,
+        "layout": "strategy_flow" if selected_strategy else "agent_work",
+        "nodes": nodes,
+        "edges": edges,
+        "focus": focus[:20],
+        "strategies": [
+            strategy_payload(row, node_map.get(str(row.get("node_id") or ""), {}))
+            for row in passing_strategies[:80]
+        ],
+        "stats": stats,
+    }

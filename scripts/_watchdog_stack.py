@@ -19,7 +19,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LOGS = ROOT / "logs"
 SRC_LOGS = ROOT / "src" / "logs"
-DB = Path(os.path.expandvars(r"%LOCALAPPDATA%\Aether\runtime\aether.sqlite3"))
+
+
+def _resolve_db_path() -> Path:
+    """Use the same runtime DB selection as the Aether stack."""
+    try:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from src.research.aether.config import db_path
+
+        return db_path()
+    except Exception:
+        return Path(os.path.expandvars(r"%LOCALAPPDATA%\Aether\runtime\aether.sqlite3"))
+
+
+DB = _resolve_db_path()
 
 
 def read_pids(path: Path) -> dict[str, int]:

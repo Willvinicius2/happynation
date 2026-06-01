@@ -27,6 +27,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $root ".venv\Scripts\python.exe"
 $logsDir = Join-Path $root "logs"
 $pidFile = Join-Path $logsDir "aether.pids"
+$projectRuntimeDir = Join-Path $root "runtime"
 
 if (-not (Test-Path $python)) {
     Write-Host "python.exe nao encontrado em $python" -ForegroundColor Red
@@ -58,6 +59,12 @@ function Import-DotEnvIfPresent {
 Import-DotEnvIfPresent (Join-Path $root ".env")
 Import-DotEnvIfPresent (Join-Path $env:LOCALAPPDATA "hermes\.env")
 
+# Quando o runtime local do projeto ja existe, prefira-o para evitar falhas de
+# escrita em %LOCALAPPDATA%\Aether\runtime neste host.
+if (-not $env:AETHER_RUNTIME_DIR -and (Test-Path (Join-Path $projectRuntimeDir "aether.sqlite3"))) {
+    $env:AETHER_RUNTIME_DIR = $projectRuntimeDir
+}
+
 # Variaveis herdadas
 $researchTurbo = $Full -or $Stack
 if (-not $env:AETHER_ECONOMY_MODE)                         { $env:AETHER_ECONOMY_MODE = if ($researchTurbo) { "0" } else { "1" } }
@@ -79,14 +86,20 @@ if (-not $env:AETHER_INFLIGHT_WINDOW_MINUTES)              { $env:AETHER_INFLIGH
 if (-not $env:AETHER_UI_STATE_MAX_NODES) { $env:AETHER_UI_STATE_MAX_NODES = "850" }
 if (-not $env:AETHER_STATE_COMPACT_METRICS) { $env:AETHER_STATE_COMPACT_METRICS = "1" }
 if (-not $env:AETHER_PRIMARY_LLM_PROVIDER) { $env:AETHER_PRIMARY_LLM_PROVIDER = "openai" }
-if (-not $env:AETHER_OPENAI_TRANSPORT) { $env:AETHER_OPENAI_TRANSPORT = "codex_cli" }
-if (-not $env:AETHER_OPENAI_MODEL) { $env:AETHER_OPENAI_MODEL = if ($researchTurbo) { "gpt-5.3-codex-spark" } else { "gpt-5.4-mini" } }
-# gpt-5.5 can be enabled explicitly, but the current local Codex CLI build exits
-# non-zero with that model on this machine. Default to the healthy model so the
-# research loop keeps producing hypotheses instead of opening the circuit breaker.
-if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL = if ($researchTurbo) { "gpt-5.3-codex-spark" } else { "gpt-5.4-mini" } }
-if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT = if ($researchTurbo) { "low" } else { "high" } }
-if (-not $env:AETHER_CODEX_CLI_TIMEOUT) { $env:AETHER_CODEX_CLI_TIMEOUT = if ($researchTurbo) { "150" } else { "300" } }
+$codexShim = Join-Path $env:APPDATA "npm\codex.cmd"
+if (Test-Path $codexShim) {
+    $env:AETHER_CODEX_CLI_PATH = $codexShim
+    $env:AETHER_OPENAI_TRANSPORT = "codex_cli"
+    $env:AETHER_PREFER_CODEX_CLI = "1"
+} elseif (-not $env:AETHER_OPENAI_TRANSPORT) {
+    $env:AETHER_OPENAI_TRANSPORT = "codex_cli"
+}
+if (-not $env:AETHER_OPENAI_MODEL) { $env:AETHER_OPENAI_MODEL = "gpt-5.4-mini" }
+# Keep full research on the model that is healthy on this workstation. The
+# spark model repeatedly trips the LLM circuit breaker and stalls generation.
+if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_MODEL = "gpt-5.4-mini" }
+if (-not $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT) { $env:AETHER_OPENAI_ROLE_HYPOTHESIS_GENERATOR_EFFORT = "high" }
+if (-not $env:AETHER_CODEX_CLI_TIMEOUT) { $env:AETHER_CODEX_CLI_TIMEOUT = "300" }
 if (-not $env:AETHER_CONTEXT_BROKER) { $env:AETHER_CONTEXT_BROKER = "0" }
 $env:AETHER_DEPLOY_CRITIC_GATE = if ($env:AETHER_DEPLOY_CRITIC_GATE) { $env:AETHER_DEPLOY_CRITIC_GATE } else { "approved" }
 $env:AETHER_DEPLOY_MIN_SCORE = if ($env:AETHER_DEPLOY_MIN_SCORE) { $env:AETHER_DEPLOY_MIN_SCORE } else { "0.50" }
@@ -173,6 +186,18 @@ if ($env:AETHER_PRIMARY_LLM_PROVIDER -eq "openai" -and -not ($codexInstalled -or
     Write-Host "Aviso: OpenAI foi selecionado, mas Codex CLI e API key nao parecem configurados." -ForegroundColor Yellow
 }
 
+function Normalize-StartProcessEnvironment {
+    # Windows pode expor Path/PATH em paralelo; Start-Process falha quando isso
+    # vira chaves duplicadas no dicionario de ambiente do processo filho.
+    $processPath = [System.Environment]::GetEnvironmentVariable("Path", "Process")
+    $processPATH = [System.Environment]::GetEnvironmentVariable("PATH", "Process")
+    $pathValue = if ($processPath) { $processPath } else { $processPATH }
+    [System.Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+    if ($pathValue) {
+        [System.Environment]::SetEnvironmentVariable("Path", $pathValue, "Process")
+    }
+}
+
 function Get-ExistingModuleProcesses {
     param([array]$Entries)
     $pythonProcs = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue)
@@ -226,6 +251,7 @@ foreach ($entry in $modules) {
     Set-Content -Path $logPath -Value ("[start] {0} {1}" -f (Get-Date -Format o), $module) -Encoding utf8
     Set-Content -Path $errPath -Value "" -Encoding utf8
 
+    Normalize-StartProcessEnvironment
     $proc = Start-Process -FilePath $python `
         -ArgumentList @("-u", "-m", $module) `
         -WorkingDirectory $root `
@@ -247,6 +273,7 @@ if (($Full -or $Stack) -and $deployWatchdogEnabled) {
         $errPath = Join-Path $logsDir ("{0}-{1}.err.log" -f $name, $stamp)
         Set-Content -Path $logPath -Value ("[start] {0} scripts._watchdog_stack" -f (Get-Date -Format o)) -Encoding utf8
         Set-Content -Path $errPath -Value "" -Encoding utf8
+        Normalize-StartProcessEnvironment
         $proc = Start-Process -FilePath $python `
             -ArgumentList @("-u", "-m", "scripts._watchdog_stack") `
             -WorkingDirectory $root `

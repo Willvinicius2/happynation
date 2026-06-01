@@ -3,10 +3,12 @@
 #
 # Uso:
 #   .\scripts\run_happynation_bg.ps1
-#   .\scripts\run_happynation_bg.ps1 -Restart   # mata processos antigos antes
+#   .\scripts\run_happynation_bg.ps1 -Restart          # mata processos antigos antes
+#   .\scripts\run_happynation_bg.ps1 -AggressivePaper  # coleta amostras com travas relaxadas
 
 param(
-    [switch]$Restart
+    [switch]$Restart,
+    [switch]$AggressivePaper
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,10 +25,67 @@ if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | O
 
 $env:TRADE_DASHBOARD_ALLOW_PORT_FALLBACK = if ($env:TRADE_DASHBOARD_ALLOW_PORT_FALLBACK) { $env:TRADE_DASHBOARD_ALLOW_PORT_FALLBACK } else { "1" }
 
+if ($AggressivePaper) {
+    # Modo paper agressivo: usado somente quando queremos gerar amostras rapido.
+    # Mantem o bot em paper, mas relaxa travas que normalmente impedem reentrada.
+    $env:RISK_GUARD_ENABLED = "0"
+    $env:MAX_DAILY_LOSS_PCT = "100"
+    $env:MAX_ASSET_DRAWDOWN_PCT = "100"
+    $env:MAX_GLOBAL_DRAWDOWN_PCT = "100"
+    $env:MAX_OPEN_POSITIONS = "12"
+    $env:MAX_CONSECUTIVE_LOSSES = "999"
+    $env:PAPER_AUTO_JUDGE_ENABLED = "0"
+    $env:PAPER_JUDGE_MAX_LOSS_STREAK = "999"
+    $env:PAPER_JUDGE_MIN_WINRATE_PCT = "0"
+    $env:PAPER_JUDGE_MAX_DRAWDOWN_USD = "9999"
+    $env:AETHER_SKIP_DEAD_STRATEGIES = "0"
+    $env:AETHER_ONLY_MIN_BUY_VOTES = "1"
+    $env:AETHER_ONLY_MIN_BUY_WEIGHT = "1"
+    $env:AETHER_ONLY_MIN_SELL_VOTES = "1"
+    $env:AETHER_ONLY_MIN_SELL_WEIGHT = "1"
+    $env:PAPER_MAX_POSITION_USD = "100"
+    $env:PAPER_MAX_POSITION_PCT = "10"
+    $env:PAPER_MAX_TOTAL_ALLOCATED_PCT = "100"
+    $env:PAPER_MIN_CASH_RESERVE_USD = "0"
+} else {
+    # Modo padrao: paper protegido. O historico de entradas mostrou que voto
+    # isolado + judge desligado deixava estrategias perdedoras reentrarem.
+    $env:RISK_GUARD_ENABLED = "1"
+    $env:MAX_DAILY_LOSS_PCT = "3.0"
+    $env:MAX_ASSET_DRAWDOWN_PCT = "4.0"
+    $env:MAX_GLOBAL_DRAWDOWN_PCT = "5.0"
+    $env:MAX_OPEN_POSITIONS = "4"
+    $env:MAX_CONSECUTIVE_LOSSES = "2"
+    $env:PAPER_AUTO_JUDGE_ENABLED = "1"
+    $env:PAPER_JUDGE_MIN_TRADES = "2"
+    $env:PAPER_JUDGE_MAX_LOSS_STREAK = "2"
+    $env:PAPER_JUDGE_MIN_WINRATE_PCT = "35"
+    $env:PAPER_JUDGE_MAX_DRAWDOWN_USD = "8"
+    $env:AETHER_SKIP_DEAD_STRATEGIES = "1"
+    $env:AETHER_ONLY_MIN_BUY_VOTES = "2"
+    $env:AETHER_ONLY_MIN_BUY_WEIGHT = "2"
+    $env:AETHER_ONLY_MIN_SELL_VOTES = "1"
+    $env:AETHER_ONLY_MIN_SELL_WEIGHT = "1"
+    $env:PAPER_MAX_POSITION_USD = "100"
+    $env:PAPER_MAX_POSITION_PCT = "10"
+    $env:PAPER_MAX_TOTAL_ALLOCATED_PCT = "60"
+    $env:PAPER_MIN_CASH_RESERVE_USD = "100"
+}
+
 $modules = @(
     @{ name = "bot";       module = "src.main" },
     @{ name = "dashboard"; module = "src.dashboard" }
 )
+
+function Normalize-StartProcessEnvironment {
+    $processPath = [System.Environment]::GetEnvironmentVariable("Path", "Process")
+    $processPATH = [System.Environment]::GetEnvironmentVariable("PATH", "Process")
+    $pathValue = if ($processPath) { $processPath } else { $processPATH }
+    [System.Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+    if ($pathValue) {
+        [System.Environment]::SetEnvironmentVariable("Path", $pathValue, "Process")
+    }
+}
 
 function Get-ExistingModuleProcesses {
     param([array]$Entries)
@@ -77,6 +136,7 @@ foreach ($entry in $modules) {
     Set-Content -Path $logPath -Value ("[start] {0} {1}" -f (Get-Date -Format o), $module) -Encoding utf8
     Set-Content -Path $errPath -Value "" -Encoding utf8
 
+    Normalize-StartProcessEnvironment
     $proc = Start-Process -FilePath $python `
         -ArgumentList @("-u", "-m", $module) `
         -WorkingDirectory $root `

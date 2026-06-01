@@ -21,6 +21,16 @@ def _credentials() -> tuple[str | None, str | None]:
 
 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID = _credentials()
 
+_PLACEHOLDER_HINTS = (
+    "your_",
+    "seu_",
+    "sua_",
+    "cole sua",
+    "changeme",
+    "placeholder",
+    "example",
+)
+
 
 def _mask(value: str | None) -> str:
     if not value:
@@ -30,12 +40,19 @@ def _mask(value: str | None) -> str:
     return value[:8] + "..." + value[-5:]
 
 
+def _configured(value: str | None) -> bool:
+    cleaned = (value or "").strip().strip('"').strip("'")
+    if not cleaned:
+        return False
+    return not any(hint in cleaned.lower() for hint in _PLACEHOLDER_HINTS)
+
+
 def send_telegram_message(token: str | None, chat_id: str | None, message: str) -> requests.Response | None:
-    if not token or not chat_id:
+    if not _configured(token) or not _configured(chat_id):
         logging.warning(
             "[TELEGRAM] envio ignorado: token=%s chat_id=%s",
             _mask(token),
-            chat_id or "<missing>",
+            _mask(chat_id),
         )
         return None
 

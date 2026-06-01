@@ -28,6 +28,9 @@ def runtime_dir() -> Path:
     override = os.environ.get("AETHER_RUNTIME_DIR")
     if override:
         return Path(override).resolve()
+    project_runtime = WORKSPACE_ROOT / "runtime"
+    if (project_runtime / "aether.sqlite3").exists():
+        return project_runtime.resolve()
     local = os.environ.get("LOCALAPPDATA")
     if local:
         return Path(local).resolve() / "Aether" / "runtime"
