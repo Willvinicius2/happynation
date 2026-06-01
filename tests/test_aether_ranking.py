@@ -161,10 +161,12 @@ def test_auto_deploy_caps_same_asset_family_timeframe(monkeypatch):
     ]
 
     cap_reasons: Counter[str] = Counter()
-    selected = auto_deploy._select_deploy_records(ranked, cap_reasons=cap_reasons)
+    cap_details: Counter[str] = Counter()
+    selected = auto_deploy._select_deploy_records(ranked, cap_reasons=cap_reasons, cap_details=cap_details)
 
     assert [rec["id"] for _score, rec in selected] == ["best", "other-tf"]
     assert cap_reasons["asset_family_timeframe_cap"] == 1
+    assert cap_details["asset_family_timeframe:LINKUSDT|bollinger|1d"] == 1
 
 
 def test_auto_deploy_reserves_manual_caps_and_manages_aether_sources(monkeypatch):
@@ -182,9 +184,11 @@ def test_auto_deploy_reserves_manual_caps_and_manages_aether_sources(monkeypatch
     ]
     reserved = [{"id": "manual", "source": "manual", "engine": "adx", "asset": "BTCUSDT", "timeframe": "1h"}]
 
-    selected = auto_deploy._select_deploy_records(ranked, reserved_records=reserved)
+    cap_details: Counter[str] = Counter()
+    selected = auto_deploy._select_deploy_records(ranked, reserved_records=reserved, cap_details=cap_details)
 
     assert [rec["id"] for _score, rec in selected] == ["open-slot"]
+    assert cap_details["asset:BTCUSDT"] == 1
     assert auto_deploy._is_managed_record({"source": "aether_happynation"}) is True
     assert auto_deploy._is_managed_record({"source": "aether_manual_ranking_deploy"}) is True
     assert auto_deploy._is_managed_record({"source": "manual"}) is False
@@ -242,6 +246,7 @@ def test_auto_deploy_run_once_returns_reason_counters(monkeypatch):
     assert result["gate_reasons"] == {"trades_below_min": 1}
     assert result["record_reasons"] == {"asset_not_allowed": 1}
     assert result["blocklist_reasons"] == {"manual_review": 1}
+    assert result["cap_details"] == {}
     assert any("deploy detail:" in line for line in log.lines)
 
 

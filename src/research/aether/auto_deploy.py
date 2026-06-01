@@ -498,6 +498,14 @@ def _format_reason_counts(counts: Counter[str], limit: int = 8) -> str:
     return ",".join(parts)
 
 
+def _cap_detail_key(kind: str, *parts: str) -> str:
+    clean_parts = []
+    for part in parts:
+        token = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(part or "?")).strip("_")
+        clean_parts.append((token or "?")[:48])
+    return f"{kind}:{'|'.join(clean_parts)}"
+
+
 def _reason_bucket(reason: str) -> str:
     text = str(reason or "blocked").strip().lower()
     if text.startswith("manifest top validation rejected:"):
@@ -523,6 +531,7 @@ def _select_deploy_records(
     ranked: list[tuple[float, dict]],
     reserved_records: list[dict] | None = None,
     cap_reasons: Counter[str] | None = None,
+    cap_details: Counter[str] | None = None,
 ) -> list[tuple[float, dict]]:
     selected: list[tuple[float, dict]] = []
     family_counts, asset_counts, asset_family_tf_counts, hyp_asset_counts = _seed_cap_counts(reserved_records or [])
@@ -534,19 +543,27 @@ def _select_deploy_records(
         if MAX_PER_FAMILY > 0 and family_counts.get(family, 0) >= MAX_PER_FAMILY:
             if cap_reasons is not None:
                 cap_reasons["family_cap"] += 1
+            if cap_details is not None:
+                cap_details[_cap_detail_key("family", family)] += 1
             continue
         if MAX_PER_ASSET > 0 and asset_counts.get(asset, 0) >= MAX_PER_ASSET:
             if cap_reasons is not None:
                 cap_reasons["asset_cap"] += 1
+            if cap_details is not None:
+                cap_details[_cap_detail_key("asset", asset)] += 1
             continue
         if MAX_PER_ASSET_FAMILY_TF > 0 and asset_family_tf_counts.get(asset_family_tf, 0) >= MAX_PER_ASSET_FAMILY_TF:
             if cap_reasons is not None:
                 cap_reasons["asset_family_timeframe_cap"] += 1
+            if cap_details is not None:
+                cap_details[_cap_detail_key("asset_family_timeframe", asset, family, str(rec.get("timeframe") or "?"))] += 1
             continue
         # Cap de variacoes da mesma hipotese-base no mesmo ativo.
         if MAX_PER_HYPOTHESIS_ASSET > 0 and hyp_asset_counts.get(hyp_key, 0) >= MAX_PER_HYPOTHESIS_ASSET:
             if cap_reasons is not None:
                 cap_reasons["hypothesis_asset_cap"] += 1
+            if cap_details is not None:
+                cap_details[_cap_detail_key("hypothesis_asset", asset, hyp_key[0])] += 1
             continue
         selected.append((score, rec))
         family_counts[family] = family_counts.get(family, 0) + 1
@@ -556,6 +573,8 @@ def _select_deploy_records(
         if len(selected) >= DEPLOY_TOP_N:
             if cap_reasons is not None:
                 cap_reasons["top_n_cap"] += max(0, len(ranked) - idx - 1)
+            if cap_details is not None:
+                cap_details["top_n"] += max(0, len(ranked) - idx - 1)
             break
     return selected
 
@@ -569,6 +588,7 @@ def run_once(log: logging.Logger) -> dict:
     record_reasons: Counter[str] = Counter()
     blocklist_reasons: Counter[str] = Counter()
     cap_reasons: Counter[str] = Counter()
+    cap_details: Counter[str] = Counter()
     blocked = 0
     for row, metrics in nodes:
         gate_reason = _deploy_gate_block_reason(metrics, float(row["score"]))
@@ -612,7 +632,12 @@ def run_once(log: logging.Logger) -> dict:
         rec for rec in active_records
         if RESPECT_UNMANAGED_CAPS and not _is_managed_record(rec)
     ]
-    deduped = _select_deploy_records(ranked, reserved_records=reserved_records, cap_reasons=cap_reasons)
+    deduped = _select_deploy_records(
+        ranked,
+        reserved_records=reserved_records,
+        cap_reasons=cap_reasons,
+        cap_details=cap_details,
+    )
 
     # Identifica o que precisa sair: ids do manifest atual nao mais elegiveis.
     current_records = {
@@ -651,6 +676,7 @@ def run_once(log: logging.Logger) -> dict:
         "record": _format_reason_counts(record_reasons),
         "blocklist": _format_reason_counts(blocklist_reasons),
         "caps": _format_reason_counts(cap_reasons),
+        "cap_detail": _format_reason_counts(cap_details),
     }
     detail_msg = " ".join(f"{name}={value}" for name, value in details.items() if value)
     if detail_msg:
@@ -664,6 +690,7 @@ def run_once(log: logging.Logger) -> dict:
         "record_reasons": dict(record_reasons),
         "blocklist_reasons": dict(blocklist_reasons),
         "cap_reasons": dict(cap_reasons),
+        "cap_details": dict(cap_details),
     }
 
 

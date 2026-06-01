@@ -10,7 +10,7 @@ def _write_auto_deploy_log(path: Path) -> None:
         "\n".join(
             [
                 "2026-06-01 15:01:38,893 INFO deploy: candidates=184 struct_dedupe=128 func_dropped=17 after_dedupe=29 deployed=0 skipped_unchanged=29 removed_stale=0 blocked=15",
-                "2026-06-01 15:01:38,893 INFO deploy detail: gate=score_below_min:211,mdd_above_max:25 blocklist=heavy_validation_cut_or_revalidate:5,manifest_top_validation_trade_sample:3 caps=asset_cap:55,family_cap:24",
+                "2026-06-01 15:01:38,893 INFO deploy detail: gate=score_below_min:211,mdd_above_max:25 blocklist=heavy_validation_cut_or_revalidate:5,manifest_top_validation_trade_sample:3 caps=asset_cap:55,family_cap:24 cap_detail=asset:BTCUSDT:17,family:combo:12",
             ]
         ),
         encoding="utf-8",
@@ -29,6 +29,7 @@ def test_auto_deploy_log_snapshot_parses_latest_summary_and_reasons(tmp_path):
     assert snapshot["details"]["gate"] == {"score_below_min": 211, "mdd_above_max": 25}
     assert snapshot["details"]["blocklist"]["heavy_validation_cut_or_revalidate"] == 5
     assert snapshot["details"]["caps"] == {"asset_cap": 55, "family_cap": 24}
+    assert snapshot["details"]["cap_detail"] == {"asset:BTCUSDT": 17, "family:combo": 12}
 
 
 def test_auto_deploy_log_snapshot_does_not_attach_stale_detail(tmp_path):
@@ -58,3 +59,4 @@ def test_show_auto_deploy_flow_prints_actionable_bottlenecks(tmp_path, monkeypat
     assert "candidates=184 after_dedupe=29 deployed=0" in out
     assert "score_below_min: 211" in out
     assert "asset_cap: 55" in out
+    assert "asset:BTCUSDT: 17" in out
