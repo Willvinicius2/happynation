@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.research.aether.config import db_path, sqlite_busy_timeout_ms
+from src.research.aether.config import db_path, sqlite_busy_retry_seconds, sqlite_busy_timeout_ms
 from src.research.active import deploy_record, list_active, remove
 
 LOG_PATH = Path(__file__).resolve().parents[3] / "src" / "logs" / "aether" / "auto_deploy.log"
@@ -32,6 +32,7 @@ BLOCKLIST_PATH = Path(
 )
 
 POLL_SECONDS = int(os.environ.get("AETHER_DEPLOY_POLL_SECONDS", "60"))
+BUSY_RETRY_SECONDS = sqlite_busy_retry_seconds()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -607,11 +608,15 @@ def main() -> int:
     )
     log.info("blocklist=%s", BLOCKLIST_PATH)
     while True:
+        sleep_for = POLL_SECONDS
         try:
             run_once(log)
+        except sqlite3.OperationalError as exc:
+            log.warning("sqlite busy/lock: %s", exc)
+            sleep_for = BUSY_RETRY_SECONDS
         except Exception:
             log.exception("erro no ciclo de deploy")
-        time.sleep(POLL_SECONDS)
+        time.sleep(sleep_for)
 
 
 if __name__ == "__main__":

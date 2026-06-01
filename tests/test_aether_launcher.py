@@ -59,3 +59,19 @@ def test_aether_config_sqlite_busy_timeout_is_configurable(monkeypatch):
 
     monkeypatch.setenv("AETHER_SQLITE_BUSY_TIMEOUT_MS", "bad")
     assert config.sqlite_busy_timeout_ms() == 90000
+
+
+def test_aether_config_sqlite_busy_retry_is_short_and_bounded(monkeypatch):
+    import src.research.aether.config as config
+
+    monkeypatch.delenv("AETHER_SQLITE_BUSY_RETRY_SECONDS", raising=False)
+    assert config.sqlite_busy_retry_seconds() == 5.0
+
+    monkeypatch.setenv("AETHER_SQLITE_BUSY_RETRY_SECONDS", "0.2")
+    assert config.sqlite_busy_retry_seconds() == 1.0
+
+    monkeypatch.setenv("AETHER_SQLITE_BUSY_RETRY_SECONDS", "45")
+    assert config.sqlite_busy_retry_seconds() == 30.0
+
+    monkeypatch.setenv("AETHER_SQLITE_BUSY_RETRY_SECONDS", "bad")
+    assert config.sqlite_busy_retry_seconds() == 5.0

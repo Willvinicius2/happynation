@@ -51,6 +51,14 @@ def sqlite_busy_timeout_ms() -> int:
         return 90000
 
 
+def sqlite_busy_retry_seconds() -> float:
+    try:
+        value = float(os.environ.get("AETHER_SQLITE_BUSY_RETRY_SECONDS", "5"))
+    except (TypeError, ValueError):
+        value = 5.0
+    return max(1.0, min(30.0, value))
+
+
 def checkpoint_dir() -> Path:
     return runtime_dir() / "checkpoints"
 

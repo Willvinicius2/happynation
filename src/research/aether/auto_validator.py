@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.research.aether.config import db_path, sqlite_busy_timeout_ms
+from src.research.aether.config import db_path, sqlite_busy_retry_seconds, sqlite_busy_timeout_ms
 
 DB_PATH = db_path()
 LOG_PATH = Path(__file__).resolve().parents[3] / "src" / "logs" / "aether" / "auto_validator.log"
@@ -41,6 +41,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 POLL_SECONDS = _env_int("AETHER_VALIDATOR_POLL_SECONDS", 60)
+BUSY_RETRY_SECONDS = sqlite_busy_retry_seconds()
 READY_STATUSES = ("expand", "expanded")
 MIN_SCORE = _env_float("AETHER_VALIDATOR_MIN_SCORE", 0.42)
 MIN_TRADES = _env_int("AETHER_VALIDATOR_MIN_TRADES", 30)
@@ -218,6 +219,7 @@ def main() -> int:
         log.error(f"DB nao existe: {DB_PATH}")
         return 1
     while True:
+        sleep_for = POLL_SECONDS
         try:
             with _connect() as conn:
                 n = run_once(conn, log)
@@ -225,9 +227,10 @@ def main() -> int:
                     log.info(f"ciclo: {n} novas validadas")
         except sqlite3.OperationalError as e:
             log.warning(f"sqlite busy/lock: {e}; tentando de novo")
+            sleep_for = BUSY_RETRY_SECONDS
         except Exception as e:
             log.exception(f"erro no ciclo: {e}")
-        time.sleep(POLL_SECONDS)
+        time.sleep(sleep_for)
 
 
 if __name__ == "__main__":

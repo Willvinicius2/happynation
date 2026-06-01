@@ -36,12 +36,13 @@ from src.research.aether.compute import (
 )
 from src.research.aether import compute as _compute_mod
 from src.research.aether import gpu_compute as _gpu_compute
-from src.research.aether.config import db_path, sqlite_busy_timeout_ms
+from src.research.aether.config import db_path, sqlite_busy_retry_seconds, sqlite_busy_timeout_ms
 
 DB_PATH = db_path()
 LOG_PATH = Path(__file__).resolve().parents[3] / "src" / "logs" / "aether" / "critic_agent.log"
 
 POLL_SECONDS = max(10, int(os.getenv("AETHER_CRITIC_POLL_SECONDS", "90")))
+BUSY_RETRY_SECONDS = sqlite_busy_retry_seconds()
 ALT_SYMBOLS = (
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
     "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "MATICUSDT",
@@ -835,6 +836,7 @@ def main() -> int:
     idle_streak = 0
     while True:
         a, r = 0, 0
+        sleep_for = POLL_SECONDS
         try:
             with _connect() as conn:
                 a, r = run_once(conn, log)
@@ -842,6 +844,7 @@ def main() -> int:
                     log.info(f"ciclo: approved={a} rejected={r}")
         except sqlite3.OperationalError as e:
             log.warning(f"sqlite busy/lock: {e}")
+            sleep_for = BUSY_RETRY_SECONDS
         except Exception as e:
             log.exception(f"erro no ciclo: {e}")
         # Libera RAM/VRAM entre ciclos. Critic processa em rajadas curtas e
@@ -860,7 +863,7 @@ def main() -> int:
                 gc.collect()
             except AttributeError:
                 pass
-        time.sleep(POLL_SECONDS)
+        time.sleep(sleep_for)
 
 
 if __name__ == "__main__":
