@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import scripts.status as status
@@ -35,6 +38,104 @@ def test_process_summary_detects_duplicate_roots_and_optional_promote_loop():
     assert duplicate_summary["flag"] == "DUP"
     assert promote_off["flag"] == "OFF"
     assert promote_running["flag"] == "RISCO"
+
+
+def _make_productivity_db(path: Path) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE events (ts TEXT, type TEXT, payload_json TEXT)")
+        conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT)")
+        conn.execute("CREATE TABLE tasks (status TEXT, updated_at TEXT)")
+        conn.executemany(
+            "INSERT INTO events VALUES (?, ?, ?)",
+            [
+                (
+                    "2026-06-01T17:20:00Z",
+                    "research_completed",
+                    json.dumps(
+                        {
+                            "llm": {"created_hypotheses": 1, "created_nodes": 7},
+                            "web": {"created_hypotheses": 2, "created_nodes": 14},
+                        }
+                    ),
+                ),
+                ("2026-06-01T17:25:00Z", "llm_research_completed", json.dumps({"created": 1})),
+                ("2026-06-01T17:30:00Z", "critic_approved", "{}"),
+                ("2026-06-01T17:31:00Z", "critic_rejected", "{}"),
+                (
+                    "2026-06-01T16:00:00Z",
+                    "research_completed",
+                    json.dumps({"llm": {"created_nodes": 99}, "web": {"created_nodes": 99}}),
+                ),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO tasks VALUES (?, ?)",
+            [
+                ("running", "2026-06-01T17:55:00Z"),
+                ("queued", "2026-06-01T17:56:00Z"),
+                ("completed", "2026-06-01T17:57:00Z"),
+                ("completed", "2026-06-01T16:00:00Z"),
+            ],
+        )
+        conn.execute(
+            "INSERT INTO settings VALUES (?, ?)",
+            (
+                "hyper_controls",
+                json.dumps(
+                    {
+                        "verdict": "stuck",
+                        "force_exploration_every": 2,
+                        "best_age_min": 3000,
+                        "critic_reject_rate": 0.5,
+                        "focus_open_count": 12,
+                        "focus_open_budget": 24,
+                        "running_tasks": 1,
+                        "queued_tasks": 1,
+                        "last_seen_at": "2026-06-01T17:35:00Z",
+                    }
+                ),
+            ),
+        )
+
+
+def test_aether_productivity_snapshot_summarizes_recent_agent_work(tmp_path):
+    db = tmp_path / "aether.sqlite3"
+    _make_productivity_db(db)
+
+    snapshot = status.latest_aether_productivity_snapshot(
+        db,
+        window_minutes=60,
+        now=datetime(2026, 6, 1, 18, 0, tzinfo=timezone.utc),
+    )
+
+    assert snapshot["research_cycles"] == 1
+    assert snapshot["llm_nodes"] == 7
+    assert snapshot["web_nodes"] == 14
+    assert snapshot["llm_created"] == 1
+    assert snapshot["critic_approved"] == 1
+    assert snapshot["critic_rejected"] == 1
+    assert snapshot["tasks"] == {"queued": 1, "running": 1, "recent_completed": 1}
+    assert snapshot["hyper"]["verdict"] == "stuck"
+
+
+def test_show_aether_productivity_prints_hyper_and_task_health(tmp_path, monkeypatch, capsys):
+    db = tmp_path / "aether.sqlite3"
+    _make_productivity_db(db)
+    monkeypatch.setattr(status, "resolve_aether_db_path", lambda: db)
+    monkeypatch.setattr(
+        status,
+        "utc_cutoff",
+        lambda _minutes, _now=None: "2026-06-01T17:00:00Z",
+    )
+
+    status.show_aether_productivity()
+
+    out = capsys.readouterr().out
+    assert "PRODUTIVIDADE AETHER" in out
+    assert "pesquisa: ciclos=1 llm_nodes=7 web_nodes=14" in out
+    assert "critic: approved=1 rejected=1 reject_rate=50.0%" in out
+    assert "tasks: queued=1 recent_completed=1 running=1" in out
+    assert "hyper: verdict=stuck every=2" in out
 
 
 def _write_auto_deploy_log(path: Path) -> None:

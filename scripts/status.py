@@ -18,6 +18,7 @@ import csv
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import urllib.error
@@ -205,6 +206,216 @@ def show_aether_ranking() -> None:
         print(f"  reset_at: {reset.get('reset_at', '-')}")
     print(f"  novas aprovadas no ranking: {data.get('count', 0)}")
     print(f"  novas descobertas no pipeline: {len(data.get('discoveries') or [])}")
+
+
+def resolve_aether_db_path() -> Path:
+    try:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from src.research.aether.config import db_path
+
+        return Path(db_path())
+    except Exception:
+        return ROOT / "runtime" / "aether.sqlite3"
+
+
+def safe_json_loads(raw) -> dict:
+    try:
+        data = json.loads(raw or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def nested_int(data: dict, *keys: str) -> int:
+    cur = data
+    for key in keys:
+        if not isinstance(cur, dict):
+            return 0
+        cur = cur.get(key)
+    try:
+        return int(cur or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def utc_cutoff(minutes: int, now: datetime | None = None) -> str:
+    base = now or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    return (base.astimezone(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def task_status_counts(conn: sqlite3.Connection, cutoff: str | None = None) -> dict[str, int]:
+    try:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM tasks WHERE status IN ('queued', 'running') GROUP BY status"
+        ).fetchall()
+    except sqlite3.Error:
+        return {}
+    counts = {str(row["status"] or "?"): int(row["n"] or 0) for row in rows}
+    if cutoff:
+        try:
+            recent_rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS n
+                FROM tasks
+                WHERE updated_at >= ?
+                  AND status IN ('completed', 'failed')
+                GROUP BY status
+                """,
+                (cutoff,),
+            ).fetchall()
+        except sqlite3.Error:
+            recent_rows = []
+        for row in recent_rows:
+            counts[f"recent_{row['status']}"] = int(row["n"] or 0)
+    return counts
+
+
+def read_hyper_controls(conn: sqlite3.Connection) -> dict:
+    try:
+        row = conn.execute("SELECT value_json FROM settings WHERE key='hyper_controls'").fetchone()
+    except sqlite3.Error:
+        return {}
+    return safe_json_loads(row["value_json"]) if row else {}
+
+
+def latest_aether_productivity_snapshot(
+    db: Path | None = None,
+    *,
+    window_minutes: int = 60,
+    now: datetime | None = None,
+) -> dict:
+    db_file = Path(db or resolve_aether_db_path())
+    if not db_file.exists():
+        return {"db": str(db_file), "exists": False}
+
+    cutoff = utc_cutoff(window_minutes, now)
+    snapshot = {
+        "db": str(db_file),
+        "exists": True,
+        "window_minutes": window_minutes,
+        "research_cycles": 0,
+        "research_last_at": "",
+        "llm_nodes": 0,
+        "llm_hypotheses": 0,
+        "web_nodes": 0,
+        "web_hypotheses": 0,
+        "llm_accept_cycles": 0,
+        "llm_accept_last_at": "",
+        "llm_created": 0,
+        "llm_rejected_family_cap": 0,
+        "llm_rejected_duplicate": 0,
+        "critic_approved": 0,
+        "critic_rejected": 0,
+        "tasks": {},
+        "hyper": {},
+    }
+    with sqlite3.connect(str(db_file), timeout=10.0) as conn:
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                SELECT ts, type, payload_json
+                FROM events
+                WHERE ts >= ?
+                  AND type IN ('research_completed', 'llm_research_completed', 'critic_approved', 'critic_rejected')
+                ORDER BY ts ASC
+                """,
+                (cutoff,),
+            ).fetchall()
+        except sqlite3.Error:
+            rows = []
+        for row in rows:
+            event_type = str(row["type"] or "")
+            payload = safe_json_loads(row["payload_json"])
+            ts = str(row["ts"] or "")
+            if event_type == "research_completed":
+                snapshot["research_cycles"] += 1
+                snapshot["research_last_at"] = ts
+                snapshot["llm_nodes"] += nested_int(payload, "llm", "created_nodes")
+                snapshot["llm_hypotheses"] += nested_int(payload, "llm", "created_hypotheses")
+                snapshot["web_nodes"] += nested_int(payload, "web", "created_nodes")
+                snapshot["web_hypotheses"] += nested_int(payload, "web", "created_hypotheses")
+            elif event_type == "llm_research_completed":
+                snapshot["llm_accept_cycles"] += 1
+                snapshot["llm_accept_last_at"] = ts
+                snapshot["llm_created"] += nested_int(payload, "created")
+                snapshot["llm_rejected_family_cap"] += nested_int(payload, "rejected_family_cap")
+                snapshot["llm_rejected_duplicate"] += nested_int(payload, "rejected_duplicate")
+            elif event_type == "critic_approved":
+                snapshot["critic_approved"] += 1
+            elif event_type == "critic_rejected":
+                snapshot["critic_rejected"] += 1
+        snapshot["tasks"] = task_status_counts(conn, cutoff)
+        snapshot["hyper"] = read_hyper_controls(conn)
+    return snapshot
+
+
+def format_age_minutes(value) -> str:
+    try:
+        minutes = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if minutes >= 1440:
+        return f"{minutes:.0f}min ({minutes / 1440:.1f}d)"
+    return f"{minutes:.0f}min"
+
+
+def show_aether_productivity() -> None:
+    section("PRODUTIVIDADE AETHER")
+    snapshot = latest_aether_productivity_snapshot()
+    if not snapshot.get("exists"):
+        print(f"  db nao existe: {snapshot.get('db')}")
+        return
+
+    print(f"  janela DB: ultimos {snapshot.get('window_minutes', 60)}min")
+    print(
+        "  pesquisa: ciclos={cycles} llm_nodes={llm_nodes} web_nodes={web_nodes} "
+        "llm_h={llm_h} web_h={web_h} ultimo={last}".format(
+            cycles=snapshot.get("research_cycles", 0),
+            llm_nodes=snapshot.get("llm_nodes", 0),
+            web_nodes=snapshot.get("web_nodes", 0),
+            llm_h=snapshot.get("llm_hypotheses", 0),
+            web_h=snapshot.get("web_hypotheses", 0),
+            last=snapshot.get("research_last_at") or "-",
+        )
+    )
+    print(
+        "  llm aceitos: ciclos={cycles} criados={created} rej_familia={family} "
+        "rej_dup={duplicate} ultimo={last}".format(
+            cycles=snapshot.get("llm_accept_cycles", 0),
+            created=snapshot.get("llm_created", 0),
+            family=snapshot.get("llm_rejected_family_cap", 0),
+            duplicate=snapshot.get("llm_rejected_duplicate", 0),
+            last=snapshot.get("llm_accept_last_at") or "-",
+        )
+    )
+    approved = int(snapshot.get("critic_approved") or 0)
+    rejected = int(snapshot.get("critic_rejected") or 0)
+    total = approved + rejected
+    reject_rate = (rejected / total * 100.0) if total else 0.0
+    print(f"  critic: approved={approved} rejected={rejected} reject_rate={reject_rate:.1f}%")
+    tasks = snapshot.get("tasks") or {}
+    task_parts = [f"{key}={tasks[key]}" for key in sorted(tasks)]
+    print(f"  tasks: {' '.join(task_parts) if task_parts else '-'}")
+    hyper = snapshot.get("hyper") or {}
+    if hyper:
+        print(
+            "  hyper: verdict={verdict} every={every} age={age} reject={reject} "
+            "focus={focus_open}/{focus_budget} tasks={running}/{queued} last_seen={last_seen}".format(
+                verdict=hyper.get("verdict", "-"),
+                every=hyper.get("force_exploration_every", "-"),
+                age=format_age_minutes(hyper.get("best_age_min")),
+                reject=hyper.get("critic_reject_rate", "-"),
+                focus_open=hyper.get("focus_open_count", "-"),
+                focus_budget=hyper.get("focus_open_budget", "-"),
+                running=hyper.get("running_tasks", "-"),
+                queued=hyper.get("queued_tasks", "-"),
+                last_seen=hyper.get("last_seen_at") or hyper.get("updated_at") or "-",
+            )
+        )
 
 
 def tail_lines(path: Path, limit: int = 300) -> list[str]:
@@ -428,6 +639,7 @@ def main() -> int:
     show_processes()
     show_manifest()
     show_aether_ranking()
+    show_aether_productivity()
     show_auto_deploy_flow()
     show_paused()
     show_balance()
