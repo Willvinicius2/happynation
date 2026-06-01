@@ -5,6 +5,38 @@ from pathlib import Path
 import scripts.status as status
 
 
+def test_process_summary_treats_parent_child_pair_as_single_ok_module():
+    procs = [
+        {"Module": "aether.auto_deploy", "ProcessId": 100, "ParentProcessId": 10},
+        {"Module": "aether.auto_deploy", "ProcessId": 101, "ParentProcessId": 100},
+    ]
+
+    summary = status.summarize_module_processes("aether.auto_deploy", procs)
+
+    assert summary["flag"] == "OK"
+    assert summary["roots"] == [100]
+    assert summary["workers"] == [101]
+
+
+def test_process_summary_detects_duplicate_roots_and_optional_promote_loop():
+    duplicates = [
+        {"Module": "aether.critic_agent", "ProcessId": 200, "ParentProcessId": 10},
+        {"Module": "aether.critic_agent", "ProcessId": 201, "ParentProcessId": 11},
+    ]
+
+    duplicate_summary = status.summarize_module_processes("aether.critic_agent", duplicates)
+    promote_off = status.summarize_module_processes("promote_loop", [], promote_expected=False)
+    promote_running = status.summarize_module_processes(
+        "promote_loop",
+        [{"Module": "promote_loop", "ProcessId": 300, "ParentProcessId": 10}],
+        promote_expected=False,
+    )
+
+    assert duplicate_summary["flag"] == "DUP"
+    assert promote_off["flag"] == "OFF"
+    assert promote_running["flag"] == "RISCO"
+
+
 def _write_auto_deploy_log(path: Path) -> None:
     path.write_text(
         "\n".join(

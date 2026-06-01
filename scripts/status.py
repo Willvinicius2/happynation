@@ -39,6 +39,17 @@ AETHER_RANKING_URL = (
     "?capital=1000&limit=250&campaign_id=active&dedupe=true&hide_blocked=false&discoveries_limit=80"
 )
 AUTO_DEPLOY_DETAIL_KEYS = ("gate", "record", "blocklist", "caps", "cap_detail")
+EXPECTED_PROCESS_MODULES = [
+    "aether.server",
+    "aether.auto_validator",
+    "aether.hyper_agent",
+    "aether.critic_agent",
+    "aether.auto_deploy",
+    "deploy_watchdog",
+    "promote_loop",
+    "bot",
+    "dashboard",
+]
 
 
 def section(title: str) -> None:
@@ -73,24 +84,87 @@ def list_aether_processes() -> list[dict]:
         return []
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "sim", "on"}
+
+
+def process_id(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def summarize_module_processes(module: str, procs: list[dict], *, promote_expected: bool = False) -> dict:
+    rows = [p for p in procs if p.get("Module") == module]
+    pids = sorted(pid for pid in (process_id(p.get("ProcessId")) for p in rows) if pid is not None)
+    if not pids:
+        if module == "promote_loop" and not promote_expected:
+            return {"flag": "OFF", "pids": [], "roots": [], "workers": [], "note": "esperado desligado"}
+        return {"flag": "FALTA", "pids": [], "roots": [], "workers": [], "note": ""}
+
+    pid_set = set(pids)
+    roots: list[int] = []
+    workers: list[int] = []
+    for p in rows:
+        pid = process_id(p.get("ProcessId"))
+        if pid is None:
+            continue
+        parent = process_id(p.get("ParentProcessId"))
+        if parent in pid_set:
+            workers.append(pid)
+        else:
+            roots.append(pid)
+
+    roots = sorted(roots)
+    workers = sorted(workers)
+    if module == "promote_loop" and not promote_expected:
+        flag = "RISCO"
+        note = "promote_loop deveria estar off"
+    elif not roots:
+        flag = "ORFAO"
+        note = "sem supervisor raiz"
+    elif len(roots) > 1:
+        flag = "DUP"
+        note = "multiplos supervisores"
+    else:
+        flag = "OK"
+        note = ""
+    return {"flag": flag, "pids": pids, "roots": roots, "workers": workers, "note": note}
+
+
+def format_process_summary(summary: dict) -> str:
+    pids = summary.get("pids") or []
+    pids_str = ", ".join(str(p) for p in pids) if pids else "-"
+    detail = f"pids: {pids_str}"
+    roots = summary.get("roots") or []
+    workers = summary.get("workers") or []
+    if pids:
+        detail += f" roots: {', '.join(str(p) for p in roots) or '-'} workers: {', '.join(str(p) for p in workers) or '-'}"
+    note = summary.get("note")
+    if note:
+        detail += f" ({note})"
+    return detail
+
+
 def show_processes() -> None:
     section("PROCESSOS ATIVOS")
     procs = list_aether_processes()
-    by_module: dict[str, list[int]] = defaultdict(list)
+    by_module: dict[str, list[dict]] = defaultdict(list)
     for p in procs:
-        by_module[p.get("Module", "other")].append(p.get("ProcessId"))
+        by_module[p.get("Module", "other")].append(p)
 
-    expected = ["aether.server", "aether.auto_validator", "aether.hyper_agent",
-                "aether.critic_agent", "aether.auto_deploy", "deploy_watchdog",
-                "promote_loop", "bot", "dashboard"]
-    for mod in expected:
-        pids = by_module.get(mod, [])
-        flag = "OK" if pids else "FALTA"
-        pids_str = ", ".join(str(p) for p in pids) if pids else "-"
-        print(f"  [{flag:5}] {mod:25} pids: {pids_str}")
-    other = [m for m in by_module if m not in expected]
+    promote_expected = env_bool("HAPPYNATION_EXPECT_PROMOTE_LOOP", False)
+    for mod in EXPECTED_PROCESS_MODULES:
+        summary = summarize_module_processes(mod, by_module.get(mod, []), promote_expected=promote_expected)
+        print(f"  [{summary['flag']:5}] {mod:25} {format_process_summary(summary)}")
+    other = [m for m in by_module if m not in EXPECTED_PROCESS_MODULES]
     for mod in other:
-        print(f"  [INFO ] {mod:25} pids: {by_module[mod]}")
+        pids = [p.get("ProcessId") for p in by_module[mod]]
+        print(f"  [INFO ] {mod:25} pids: {pids}")
 
 
 def show_manifest() -> None:
