@@ -17,11 +17,12 @@ import argparse
 import csv
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
 import urllib.request
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -32,10 +33,12 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "src" / "logs" / "research" / "active_strategies.json"
 STATE = ROOT / "src" / "logs" / "paper_balance" / "state.json"
 TRADES = ROOT / "src" / "logs" / "paper_balance" / "trades.csv"
+AUTO_DEPLOY_LOG = ROOT / "src" / "logs" / "aether" / "auto_deploy.log"
 AETHER_RANKING_URL = (
     "http://127.0.0.1:8765/api/ranking"
     "?capital=1000&limit=250&campaign_id=active&dedupe=true&hide_blocked=false&discoveries_limit=80"
 )
+AUTO_DEPLOY_DETAIL_KEYS = ("gate", "record", "blocklist", "caps")
 
 
 def section(title: str) -> None:
@@ -128,6 +131,115 @@ def show_aether_ranking() -> None:
         print(f"  reset_at: {reset.get('reset_at', '-')}")
     print(f"  novas aprovadas no ranking: {data.get('count', 0)}")
     print(f"  novas descobertas no pipeline: {len(data.get('discoveries') or [])}")
+
+
+def tail_lines(path: Path, limit: int = 300) -> list[str]:
+    try:
+        with path.open(encoding="utf-8", errors="replace") as f:
+            return list(deque(f, maxlen=limit))
+    except OSError:
+        return []
+
+
+def parse_auto_deploy_summary(line: str) -> dict[str, int]:
+    if " deploy: " not in line:
+        return {}
+    payload = line.split(" deploy: ", 1)[1]
+    out: dict[str, int] = {}
+    for key, value in re.findall(r"([a-z_]+)=(-?\d+)", payload):
+        out[key] = int(value)
+    return out
+
+
+def parse_reason_counts(raw: str) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for part in raw.split(","):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        key, value = part.rsplit(":", 1)
+        try:
+            out[key.strip()] = int(value)
+        except ValueError:
+            continue
+    return out
+
+
+def parse_auto_deploy_detail(line: str) -> dict[str, dict[str, int]]:
+    marker = " deploy detail: "
+    if marker not in line:
+        return {}
+    payload = line.split(marker, 1)[1].strip()
+    matches = list(re.finditer(r"(?:(?<=\s)|^)(" + "|".join(AUTO_DEPLOY_DETAIL_KEYS) + r")=", payload))
+    details: dict[str, dict[str, int]] = {}
+    for idx, match in enumerate(matches):
+        key = match.group(1)
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(payload)
+        details[key] = parse_reason_counts(payload[match.end():end].strip())
+    return details
+
+
+def log_timestamp(line: str) -> str:
+    return line[:23].strip() if len(line) >= 23 else "?"
+
+
+def latest_auto_deploy_snapshot(log_path: Path = AUTO_DEPLOY_LOG) -> dict:
+    lines = tail_lines(log_path)
+    summary_idx = -1
+    for idx, line in reversed(list(enumerate(lines))):
+        if " deploy: " in line:
+            summary_idx = idx
+            break
+    summary_line = lines[summary_idx] if summary_idx >= 0 else ""
+    detail_line = ""
+    if summary_idx >= 0:
+        for line in lines[summary_idx + 1:]:
+            if " deploy detail: " in line:
+                detail_line = line
+                break
+    return {
+        "summary_at": log_timestamp(summary_line) if summary_line else "",
+        "detail_at": log_timestamp(detail_line) if detail_line else "",
+        "summary": parse_auto_deploy_summary(summary_line) if summary_line else {},
+        "details": parse_auto_deploy_detail(detail_line) if detail_line else {},
+    }
+
+
+def print_reason_group(title: str, counts: dict[str, int], limit: int = 5) -> None:
+    if not counts:
+        return
+    print(f"  {title}:")
+    for key, value in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]:
+        print(f"    {key}: {value}")
+
+
+def show_auto_deploy_flow() -> None:
+    section("FUNIL AUTO-DEPLOY AETHER")
+    if not AUTO_DEPLOY_LOG.exists():
+        print("  auto_deploy.log nao existe")
+        return
+    snapshot = latest_auto_deploy_snapshot(AUTO_DEPLOY_LOG)
+    summary = snapshot.get("summary") or {}
+    details = snapshot.get("details") or {}
+    if not summary:
+        print("  nenhum ciclo de deploy encontrado")
+        return
+    print(f"  ultimo ciclo: {snapshot.get('summary_at') or '?'}")
+    print(
+        "  candidates={candidates} after_dedupe={after_dedupe} deployed={deployed} "
+        "unchanged={skipped_unchanged} removed={removed_stale} blocked={blocked}".format(
+            candidates=summary.get("candidates", 0),
+            after_dedupe=summary.get("after_dedupe", 0),
+            deployed=summary.get("deployed", 0),
+            skipped_unchanged=summary.get("skipped_unchanged", 0),
+            removed_stale=summary.get("removed_stale", 0),
+            blocked=summary.get("blocked", 0),
+        )
+    )
+    print_reason_group("gates", details.get("gate") or {})
+    print_reason_group("blocklist", details.get("blocklist") or {})
+    print_reason_group("caps", details.get("caps") or {})
+    print_reason_group("records invalidos", details.get("record") or {})
 
 
 def show_paused() -> None:
@@ -241,6 +353,7 @@ def main() -> int:
     show_processes()
     show_manifest()
     show_aether_ranking()
+    show_auto_deploy_flow()
     show_paused()
     show_balance()
     show_trades(args.hours)
