@@ -8,6 +8,14 @@ from src.research.aether.db import connect, init_db, set_setting
 from src.research.aether.repository import upsert_node
 
 
+class _TestLog:
+    def info(self, *_args, **_kwargs) -> None:
+        pass
+
+    def warning(self, *_args, **_kwargs) -> None:
+        pass
+
+
 def _add_validated(conn, node_id: str, *, score: float, engine: str = "donchian") -> None:
     upsert_node(
         conn,
@@ -46,7 +54,7 @@ def test_hyper_agent_refreshes_unchanged_controls_and_preserves_manual_knobs(tmp
         previous["last_event_at"] = "2026-01-01T00:00:00Z"
         set_setting(conn, "hyper_controls", previous)
 
-        controls = hyper_agent.run_once(conn, hyper_agent._setup_logger())
+        controls = hyper_agent.run_once(conn, _TestLog())
         stored = json.loads(conn.execute("SELECT value_json FROM settings WHERE key='hyper_controls'").fetchone()[0])
         events = conn.execute("SELECT type FROM events WHERE agent_role='hyper_agent'").fetchall()
 
@@ -72,7 +80,7 @@ def test_hyper_agent_updates_controls_without_dropping_extra_fields(tmp_path):
             },
         )
 
-        controls = hyper_agent.run_once(conn, hyper_agent._setup_logger())
+        controls = hyper_agent.run_once(conn, _TestLog())
         stored = json.loads(conn.execute("SELECT value_json FROM settings WHERE key='hyper_controls'").fetchone()[0])
         event_type = conn.execute("SELECT type FROM events WHERE agent_role='hyper_agent'").fetchone()["type"]
 
@@ -101,7 +109,7 @@ def test_hyper_agent_writes_controls_when_event_insert_is_locked(tmp_path, monke
             raise sqlite3.OperationalError("database is locked")
 
         monkeypatch.setattr(hyper_agent, "_emit_event", locked_event)
-        controls = hyper_agent.run_once(conn, hyper_agent._setup_logger())
+        controls = hyper_agent.run_once(conn, _TestLog())
         stored = json.loads(conn.execute("SELECT value_json FROM settings WHERE key='hyper_controls'").fetchone()[0])
 
     assert controls["force_exploration_every"] == 4
