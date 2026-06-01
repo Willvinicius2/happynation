@@ -75,3 +75,16 @@ def test_aether_config_sqlite_busy_retry_is_short_and_bounded(monkeypatch):
 
     monkeypatch.setenv("AETHER_SQLITE_BUSY_RETRY_SECONDS", "bad")
     assert config.sqlite_busy_retry_seconds() == 5.0
+
+
+def test_aether_db_init_enables_wal(tmp_path):
+    import sqlite3
+
+    from src.research.aether.db import init_db
+
+    db = init_db(tmp_path / "aether.sqlite3")
+    con = sqlite3.connect(str(db))
+    try:
+        assert con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    finally:
+        con.close()

@@ -98,7 +98,6 @@ def _connect() -> sqlite3.Connection:
     busy_timeout = min(sqlite_busy_timeout_ms(), busy_timeout)
     conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout / 1000.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
     return conn
 

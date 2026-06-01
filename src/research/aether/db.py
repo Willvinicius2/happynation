@@ -176,7 +176,6 @@ def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
     # Multiplos agentes (orchestrator/critic/hyper/llm) abrem a mesma DB.
     # busy_timeout em ms espera a writer lock antes de levantar SQLITE_BUSY.
     conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     try:
         with conn:
