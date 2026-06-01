@@ -100,3 +100,50 @@ def test_hyper_agent_assess_reports_best_age(tmp_path):
 
     assert assessment["best_age_min"] is not None
     assert assessment["best_age_min"] > 1
+
+
+def test_hyper_agent_expands_focus_budget_when_stuck_and_completion_is_high():
+    from src.research.aether import hyper_agent
+
+    controls = hyper_agent.decide(
+        {
+            "verdict": "stuck",
+            "diversity": 0.9,
+            "dominance_pct": 10.0,
+            "best_age_min": 100.0,
+            "critic_reject_rate": 0.2,
+            "active_count": 100,
+            "focus_open_count": 19,
+            "focus_actionable_total": 100,
+            "focus_completion_ratio": 0.9,
+            "running_tasks": 18,
+            "queued_tasks": 0,
+        },
+        None,
+    )
+
+    assert controls["focus_open_budget"] >= 24
+    assert controls["focus_open_budget"] > controls["focus_open_count"]
+
+
+def test_hyper_agent_keeps_focus_budget_conservative_when_quality_drops():
+    from src.research.aether import hyper_agent
+
+    controls = hyper_agent.decide(
+        {
+            "verdict": "balanced",
+            "diversity": 0.4,
+            "dominance_pct": 70.0,
+            "best_age_min": 5.0,
+            "critic_reject_rate": 0.75,
+            "active_count": 100,
+            "focus_open_count": 20,
+            "focus_actionable_total": 100,
+            "focus_completion_ratio": 0.9,
+            "running_tasks": 18,
+            "queued_tasks": 0,
+        },
+        None,
+    )
+
+    assert controls["focus_open_budget"] == hyper_agent.FOCUS_BUDGET_MIN

@@ -39,8 +39,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.research.aether.config import db_path, sqlite_busy_timeout_ms
-from src.research.aether.repository import ensure_agents, set_agent_status
+from src.research.aether import tree_focus
+from src.research.aether.campaigns import get_active_campaign_id
+from src.research.aether.config import TIMEFRAMES, db_path, sqlite_busy_timeout_ms
+from src.research.aether.repository import set_agent_status
 
 DB_PATH = db_path()
 LOG_PATH = Path(__file__).resolve().parents[3] / "src" / "logs" / "aether" / "hyper_agent.log"
@@ -54,6 +56,10 @@ EVERY_MAX = 12
 # Limita a delta por ciclo para evitar oscilacao agressiva.
 MAX_DELTA_PER_CYCLE = 2
 HEARTBEAT_EVENT_MINUTES = max(1, int(os.getenv("AETHER_HYPER_HEARTBEAT_EVENT_MINUTES", "10")))
+FOCUS_BUDGET_MIN = max(6, int(os.getenv("AETHER_HYPER_FOCUS_BUDGET_MIN", str(max(12, len(TIMEFRAMES) * 2)))))
+FOCUS_BUDGET_NORMAL = max(FOCUS_BUDGET_MIN, int(os.getenv("AETHER_HYPER_FOCUS_BUDGET_NORMAL", str(max(18, len(TIMEFRAMES) * 3)))))
+FOCUS_BUDGET_STUCK = max(FOCUS_BUDGET_NORMAL, int(os.getenv("AETHER_HYPER_FOCUS_BUDGET_STUCK", str(max(24, len(TIMEFRAMES) * 4)))))
+FOCUS_BUDGET_MAX = max(FOCUS_BUDGET_STUCK, int(os.getenv("AETHER_HYPER_FOCUS_BUDGET_MAX", str(max(36, len(TIMEFRAMES) * 6)))))
 
 VERDICT_TO_EVERY = {
     "stuck": 2,
@@ -84,7 +90,11 @@ def _setup_logger() -> logging.Logger:
 
 
 def _connect() -> sqlite3.Connection:
-    busy_timeout = sqlite_busy_timeout_ms()
+    try:
+        busy_timeout = max(1000, int(os.getenv("AETHER_HYPER_SQLITE_BUSY_TIMEOUT_MS", "10000")))
+    except (TypeError, ValueError):
+        busy_timeout = 10000
+    busy_timeout = min(sqlite_busy_timeout_ms(), busy_timeout)
     conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout / 1000.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -189,6 +199,28 @@ def assess(conn: sqlite3.Connection) -> dict[str, Any]:
 
     critic_total = critic_approved + critic_rejected
     critic_reject_rate = (critic_rejected / critic_total) if critic_total else 0.0
+    focus_state: dict[str, Any] = {}
+    running_tasks = 0
+    queued_tasks = 0
+    try:
+        campaign_id = get_active_campaign_id(conn)
+        focus_state = tree_focus.assess(conn, campaign_id)
+        task_rows = conn.execute(
+            """
+            SELECT status, COUNT(*) AS n
+            FROM tasks
+            WHERE campaign_id=? AND status IN ('queued', 'running')
+            GROUP BY status
+            """,
+            (campaign_id,),
+        ).fetchall()
+        for task_row in task_rows:
+            if task_row["status"] == "running":
+                running_tasks = int(task_row["n"] or 0)
+            elif task_row["status"] == "queued":
+                queued_tasks = int(task_row["n"] or 0)
+    except Exception:
+        focus_state = {}
 
     return {
         "verdict": verdict,
@@ -198,7 +230,27 @@ def assess(conn: sqlite3.Connection) -> dict[str, Any]:
         "critic_reject_rate": round(critic_reject_rate, 3),
         "active_count": total,
         "family_count": len(family_active),
+        "focus_open_count": int(focus_state.get("open_count") or 0),
+        "focus_actionable_total": int(focus_state.get("actionable_total") or 0),
+        "focus_completion_ratio": float(focus_state.get("completion_ratio") or 0.0),
+        "running_tasks": running_tasks,
+        "queued_tasks": queued_tasks,
     }
+
+
+def _focus_budget_for(assessment: dict[str, Any]) -> int | None:
+    actionable = int(assessment.get("focus_actionable_total") or 0)
+    if actionable < FOCUS_BUDGET_MIN:
+        return None
+    completion = float(assessment.get("focus_completion_ratio") or 0.0)
+    reject_rate = float(assessment.get("critic_reject_rate") or 0.0)
+    if completion < 0.55 or reject_rate >= 0.60:
+        return FOCUS_BUDGET_MIN
+    if assessment.get("verdict") == "stuck" and completion >= 0.80:
+        return min(FOCUS_BUDGET_MAX, FOCUS_BUDGET_STUCK)
+    if assessment.get("verdict") in {"converging", "balanced"} and completion >= 0.70:
+        return min(FOCUS_BUDGET_MAX, FOCUS_BUDGET_NORMAL)
+    return FOCUS_BUDGET_MIN
 
 
 def decide(assessment: dict[str, Any], previous: dict[str, Any] | None) -> dict[str, Any]:
@@ -217,15 +269,23 @@ def decide(assessment: dict[str, Any], previous: dict[str, Any] | None) -> dict[
         delta = every - prev_every
         if abs(delta) > MAX_DELTA_PER_CYCLE:
             every = prev_every + (MAX_DELTA_PER_CYCLE if delta > 0 else -MAX_DELTA_PER_CYCLE)
-    return {
+    controls = {
         "force_exploration_every": int(every),
         "verdict": assessment["verdict"],
         "diversity": assessment["diversity"],
         "dominance_pct": assessment["dominance_pct"],
         "best_age_min": assessment["best_age_min"],
         "critic_reject_rate": assessment["critic_reject_rate"],
+        "focus_open_count": assessment.get("focus_open_count"),
+        "focus_completion_ratio": assessment.get("focus_completion_ratio"),
+        "running_tasks": assessment.get("running_tasks"),
+        "queued_tasks": assessment.get("queued_tasks"),
         "updated_at": _now(),
     }
+    focus_budget = _focus_budget_for(assessment)
+    if focus_budget is not None:
+        controls["focus_open_budget"] = int(focus_budget)
+    return controls
 
 
 def write_controls(conn: sqlite3.Connection, controls: dict[str, Any]) -> None:
@@ -266,6 +326,11 @@ def _changed(previous: dict[str, Any] | None, controls: dict[str, Any]) -> bool:
         "dominance_pct",
         "best_age_min",
         "critic_reject_rate",
+        "focus_open_budget",
+        "focus_open_count",
+        "focus_completion_ratio",
+        "running_tasks",
+        "queued_tasks",
     )
     return any(previous.get(key) != controls.get(key) for key in keys)
 
@@ -285,7 +350,8 @@ def _emit_event(conn: sqlite3.Connection, event_type: str, controls: dict[str, A
             (
                 f"Hyper avaliou exploracao: every={controls['force_exploration_every']} "
                 f"verdict={controls['verdict']} div={controls['diversity']} "
-                f"age={controls['best_age_min']}min reject={controls['critic_reject_rate']}."
+                f"age={controls['best_age_min']}min reject={controls['critic_reject_rate']} "
+                f"focus={controls.get('focus_open_count')}/{controls.get('focus_open_budget')}."
             ),
             json.dumps(controls, ensure_ascii=False),
         ),
@@ -293,7 +359,6 @@ def _emit_event(conn: sqlite3.Connection, event_type: str, controls: dict[str, A
 
 
 def run_once(conn: sqlite3.Connection, log: logging.Logger) -> dict[str, Any]:
-    ensure_agents(conn)
     assessment = assess(conn)
     previous = read_controls(conn)
     decided = decide(assessment, previous)
@@ -311,26 +376,35 @@ def run_once(conn: sqlite3.Connection, log: logging.Logger) -> dict[str, Any]:
         controls["last_event_at"] = controls["last_seen_at"]
         _emit_event(conn, event_type, controls)
     write_controls(conn, controls)
-    set_agent_status(
-        conn,
-        "hyper_agent",
-        "standby",
-        stats={
-            "sidecar_alive": True,
-            "last_seen_at": controls["last_seen_at"],
-            "force_exploration_every": controls["force_exploration_every"],
-            "verdict": controls["verdict"],
-            "diversity": controls["diversity"],
-            "dominance_pct": controls["dominance_pct"],
-            "best_age_min": controls["best_age_min"],
-            "critic_reject_rate": controls["critic_reject_rate"],
-            "bubble": "Meta-controle ativo.",
-        },
-    )
+    try:
+        set_agent_status(
+            conn,
+            "hyper_agent",
+            "standby",
+            stats={
+                "sidecar_alive": True,
+                "last_seen_at": controls["last_seen_at"],
+                "force_exploration_every": controls["force_exploration_every"],
+                "verdict": controls["verdict"],
+                "diversity": controls["diversity"],
+                "dominance_pct": controls["dominance_pct"],
+                "best_age_min": controls["best_age_min"],
+                "critic_reject_rate": controls["critic_reject_rate"],
+                "focus_open_budget": controls.get("focus_open_budget"),
+                "focus_open_count": controls.get("focus_open_count"),
+                "focus_completion_ratio": controls.get("focus_completion_ratio"),
+                "running_tasks": controls.get("running_tasks"),
+                "queued_tasks": controls.get("queued_tasks"),
+                "bubble": "Meta-controle ativo.",
+            },
+        )
+    except sqlite3.OperationalError as exc:
+        log.warning(f"agent_status skipped: {exc}")
     if event_type:
         log.info(
             f"{event_type}: every={controls['force_exploration_every']} verdict={controls['verdict']} "
-            f"div={controls['diversity']} age={controls['best_age_min']}min reject={controls['critic_reject_rate']}"
+            f"div={controls['diversity']} age={controls['best_age_min']}min reject={controls['critic_reject_rate']} "
+            f"focus={controls.get('focus_open_count')}/{controls.get('focus_open_budget')}"
         )
     return controls
 
