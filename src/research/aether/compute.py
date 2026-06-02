@@ -451,6 +451,15 @@ def _write_checkpoint(path: Path, payload: dict[str, Any]) -> None:
         raise last_error
 
 
+def _failed_probe_from_exception(probe: dict[str, Any], exc: BaseException, started: float) -> dict[str, Any]:
+    return {
+        **probe,
+        "ok": False,
+        "elapsed_s": round(time.time() - started, 3),
+        "error": f"{exc.__class__.__name__}: {exc}"[:500],
+    }
+
+
 def run_sweep(
     *,
     probes: list[dict[str, Any]],
@@ -621,7 +630,14 @@ def run_sweep(
                     for probe in todo
                 }
                 for future in as_completed(futures):
-                    result = future.result()
+                    probe = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        # Broken workers should fail the probe, not the whole
+                        # batch. Otherwise one process-pool crash marks every
+                        # agent task in the shared sweep as failed.
+                        result = _failed_probe_from_exception(probe, exc, started)
                     results.append(result)
                     done += 1
                     if not result.get("ok"):

@@ -22,3 +22,41 @@ def test_run_sweep_continues_when_checkpoint_write_fails(tmp_path, monkeypatch):
     assert result["completed"] == 0
     assert progress
     assert any("checkpoint_error" in item for item in progress)
+
+
+def test_run_sweep_keeps_batch_when_process_pool_future_fails(tmp_path, monkeypatch):
+    from src.research.aether import compute
+
+    class FailedFuture:
+        def result(self):
+            raise RuntimeError("process pool died")
+
+    class FakeExecutor:
+        def __init__(self, max_workers):
+            self.max_workers = max_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def submit(self, *_args, **_kwargs):
+            return FailedFuture()
+
+    monkeypatch.setattr(compute, "ProcessPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(compute, "as_completed", lambda futures: list(futures))
+    monkeypatch.setenv("AETHER_PREWARM_DATASETS", "0")
+
+    result = compute.run_sweep(
+        probes=[{"probe_id": "p1", "dataset_id": "binance:BTCUSDT:1h"}],
+        workers=2,
+        sweep_id="pool-failure",
+        checkpoint_path=tmp_path / "pool-failure.json",
+    )
+
+    assert result["status"] == "completed"
+    assert result["completed"] == 1
+    assert result["failed"] == 1
+    assert result["results"][0]["probe_id"] == "p1"
+    assert "RuntimeError: process pool died" in result["results"][0]["error"]
