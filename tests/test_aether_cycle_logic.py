@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 from src.research.aether.campaign_constants import CURRENT_CAMPAIGN_ID
 from src.research.aether.db import connect, init_db, set_setting
 from src.research.aether.repository import create_task, upsert_node
@@ -235,6 +237,38 @@ def test_queue_scout_tasks_extends_batch_to_hit_probe_target(tmp_path, monkeypat
 
     assert queued == 3
     assert task_count == 3
+
+
+def test_continuous_research_sidecar_treats_sqlite_lock_as_busy(tmp_path, monkeypatch):
+    from src.research.aether import orchestrator
+
+    monkeypatch.setenv("AETHER_RUNTIME_DIR", str(tmp_path))
+    init_db()
+
+    class StopAfterWait:
+        def __init__(self):
+            self.stopped = False
+
+        def is_set(self):
+            return self.stopped
+
+        def wait(self, _seconds):
+            self.stopped = True
+            return True
+
+    monkeypatch.setattr(orchestrator, "_STOP_EVENT", StopAfterWait())
+
+    def locked_research(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(orchestrator, "_run_research_phase", locked_research)
+
+    orchestrator._run_continuous_research_sidecar(limit_nodes=1)
+
+    with connect() as conn:
+        rows = conn.execute("SELECT type FROM events ORDER BY id").fetchall()
+
+    assert [row["type"] for row in rows] == ["continuous_research_busy"]
 
 
 def test_capped_expand_node_leaves_actionable_queue(tmp_path):

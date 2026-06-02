@@ -493,7 +493,12 @@ def api_deploy_ranking(
         skipped = []
         for ranking_row in eligible:
             deploy_blocker = str(ranking_row.get("deploy_blocker") or "")
-            if deploy_blocker and not deploy_blocker.startswith("Aguardando") and not force:
+            if (
+                deploy_blocker
+                and not deploy_blocker.startswith("Aguardando")
+                and not deploy_blocker.startswith("Cap rotacionavel")
+                and not force
+            ):
                 skipped.append({"node_id": ranking_row.get("node_id"), "reason": deploy_blocker})
                 continue
             record, reason = _active_record_from_node(conn, ranking_row)

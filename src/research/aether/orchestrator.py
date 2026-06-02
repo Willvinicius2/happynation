@@ -1789,6 +1789,19 @@ def _run_continuous_research_sidecar(limit_nodes: int) -> None:
             else:
                 _STOP_EVENT.wait(interval)
         except Exception as exc:
+            if _is_database_locked(exc):
+                try:
+                    with connect() as conn:
+                        add_event(
+                            conn,
+                            type="continuous_research_busy",
+                            agent_role="hypothesis_generator",
+                            message="SQLite ocupado; sidecar de pesquisa continua no proximo ciclo.",
+                        )
+                except Exception:
+                    pass
+                _STOP_EVENT.wait(min(5.0, interval))
+                continue
             try:
                 with connect() as conn:
                     add_event(

@@ -530,6 +530,53 @@ def test_ranking_deploy_endpoint_only_deploys_paper_ready(tmp_path, monkeypatch)
     assert [record["node_id"] for record in deployed] == ["ready"]
 
 
+def test_ranking_deploy_endpoint_allows_rotatable_caps(tmp_path, monkeypatch):
+    monkeypatch.setenv("AETHER_RUNTIME_DIR", str(tmp_path))
+    for name in list(sys.modules):
+        if name.startswith("src.research.aether"):
+            del sys.modules[name]
+
+    from src.research.aether.db import connect as runtime_connect
+    from src.research.aether.repository import upsert_node as runtime_upsert_node
+    from src.research.aether.server import app
+    import src.research.aether.server as server_module
+
+    deployed = []
+    monkeypatch.setattr(server_module, "deploy_record", lambda record, **_: deployed.append(record) or record)
+    monkeypatch.setattr(
+        server_module,
+        "build_strategy_ranking",
+        lambda *_, **__: [
+            {
+                "node_id": "rotatable",
+                "readiness": "paper_ready",
+                "deploy_blocker": "Cap rotacionavel: asset BTCUSDT tem 5/5",
+            }
+        ],
+    )
+
+    with TestClient(app) as client:
+        with runtime_connect() as conn:
+            runtime_upsert_node(
+                conn,
+                id="rotatable",
+                campaign_id=CURRENT_CAMPAIGN_ID,
+                code="ROTATE",
+                name="rotatable",
+                hypothesis="Pode rotacionar cap gerenciavel.",
+                status="validated",
+                score=0.8,
+                priority=0.8,
+                metrics=_metrics(),
+            )
+
+        response = client.post("/api/ranking/deploy?max_deploy=10")
+
+    assert response.status_code == 200
+    assert response.json()["deployed_count"] == 1
+    assert [record["node_id"] for record in deployed] == ["rotatable"]
+
+
 def test_ranking_deploy_endpoint_respects_caps_unless_forced(tmp_path, monkeypatch):
     monkeypatch.setenv("AETHER_RUNTIME_DIR", str(tmp_path))
     for name in list(sys.modules):
