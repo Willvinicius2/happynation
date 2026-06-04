@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-04T15:13:14Z",
+  "updated_at": "2026-06-04T16:42:15Z",
   "strategies": [
     {
       "id": "aether-f02dbf58d6c9ef",
@@ -1972,53 +1972,6 @@
       "deployed_at": "2026-06-02T04:37:33Z"
     },
     {
-      "id": "aether-a3115b972948f2",
-      "engine": "roc",
-      "params": {
-        "long_only": true,
-        "lower": -4.0,
-        "period": 55,
-        "upper": 12.0
-      },
-      "probe_specs": [
-        {
-          "engine": "roc",
-          "params": {
-            "long_only": true,
-            "lower": -4.0,
-            "period": 55,
-            "upper": 12.0
-          }
-        }
-      ],
-      "asset": "DOGEUSDT",
-      "timeframe": "1h",
-      "score": 0.6014,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "ROC Breakout Acceleration / roc_swing_mid (M2)",
-        "pnl_pct": 104.8964,
-        "sharpe": 1.1919,
-        "mdd_pct": 23.3978,
-        "trade_count": 105,
-        "hit_rate": 0.3143,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-06-04T05:52:05Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=102.43% wf=5/6 regime=3/5",
-        "combo_count": 0
-      },
-      "source_node_id": "llmhyp:roc-breakout-acceleration:tf:1h:mut:llm-roc-breakout-long-393723:mut:llm-roc-swing-largo-e37a79:mut:llm-roc-swing-mid-44da2f",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-06-04T05:54:28Z"
-    },
-    {
       "id": "aether-035616bb1c2c42",
       "engine": "combo",
       "params": {
@@ -2092,96 +2045,6 @@
       "source_node_id": "llmhyp:weekly-divergence-swing-breakout:tf:15m",
       "source": "aether_auto_deploy",
       "deployed_at": "2026-06-04T08:03:38Z"
-    },
-    {
-      "id": "aether-15c2c13418bdb1",
-      "engine": "adx",
-      "params": {
-        "long_only": false,
-        "period": 21,
-        "threshold": 40
-      },
-      "probe_specs": [
-        {
-          "engine": "adx",
-          "params": {
-            "long_only": false,
-            "period": 21,
-            "threshold": 40
-          }
-        }
-      ],
-      "asset": "ETHUSDT",
-      "timeframe": "1h",
-      "score": 0.6029,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "ADX Trend Breakout Filter / adx_bidirecional_filtro_forte (M2)",
-        "pnl_pct": 105.5404,
-        "sharpe": 1.3648,
-        "mdd_pct": 15.4208,
-        "trade_count": 58,
-        "hit_rate": 0.4262,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-06-04T10:04:46Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=67.95% wf=6/6 regime=4/5",
-        "combo_count": 0
-      },
-      "source_node_id": "llmhyp:adx-trend-breakout-filter:tf:1h:mut:llm-adx-slow-filter-34592c:mut:llm-adx-fast-reversal-ba66a4:mut:llm-adx-filtro-mais-lento-4cd9fc:mut:llm-adx-bidirecional-filtro-forte-200113",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-06-04T10:05:47Z"
-    },
-    {
-      "id": "aether-e890abdcb88490",
-      "engine": "donchian",
-      "params": {
-        "entry_window": 30,
-        "exit_window": 20,
-        "long_only": false
-      },
-      "probe_specs": [
-        {
-          "engine": "donchian",
-          "params": {
-            "entry_window": 30,
-            "exit_window": 20,
-            "long_only": false
-          }
-        }
-      ],
-      "asset": "ADAUSDT",
-      "timeframe": "15m",
-      "score": 0.651,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Donchian Weekly Breakout Confirmed / donchian exit_window=20 (M3)",
-        "pnl_pct": 87.1206,
-        "sharpe": 2.5027,
-        "mdd_pct": 25.2216,
-        "trade_count": 35,
-        "hit_rate": 0.5,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-06-04T10:58:24Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=76.17% wf=4/6 regime=2/3",
-        "combo_count": 0
-      },
-      "source_node_id": "llmhyp:donchian-weekly-breakout-confirmed:tf:15m:mut:entry-window-10-ef6703:mut:entry-window-20-eaf028:mut:entry-window-30-4197c4:mut:exit-window-20-3ccd6a",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-06-04T10:58:52Z"
     },
     {
       "id": "aether-c1f14b174a0d53",
@@ -2325,79 +2188,318 @@
       "deployed_at": "2026-06-04T15:13:14Z"
     },
     {
-      "id": "aether-d3c850b87c5e02",
-      "engine": "combo",
+      "id": "aether-98bd853c7b61d9",
+      "engine": "donchian",
       "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "stochastic",
-            "params": {
-              "long_only": false,
-              "overbought": 80,
-              "oversold": 20,
-              "period": 14,
-              "smooth_d": 3,
-              "smooth_k": 3
-            }
-          },
-          {
-            "engine": "structure_break",
-            "params": {
-              "confirm_bars": 1,
-              "long_only": false,
-              "swing_lookback": 8
-            }
-          }
-        ]
+        "entry_window": 30,
+        "exit_window": 20,
+        "long_only": false
       },
       "probe_specs": [
         {
-          "engine": "stochastic",
+          "engine": "donchian",
           "params": {
-            "long_only": false,
-            "overbought": 80,
-            "oversold": 20,
-            "period": 14,
-            "smooth_d": 3,
-            "smooth_k": 3
-          }
-        },
-        {
-          "engine": "structure_break",
-          "params": {
-            "confirm_bars": 1,
-            "long_only": false,
-            "swing_lookback": 8
+            "entry_window": 30,
+            "exit_window": 20,
+            "long_only": false
           }
         }
       ],
-      "asset": "BTCUSDT",
-      "timeframe": "4h",
-      "score": 0.5421,
+      "asset": "ADAUSDT",
+      "timeframe": "15m",
+      "score": 0.6489,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Stochastic divergence em pivot 4h / 4h",
-        "pnl_pct": 63.4356,
-        "sharpe": 1.1086,
-        "mdd_pct": 25.8997,
-        "trade_count": 83,
-        "hit_rate": 0.4878,
+        "name": "Donchian Accumulation Breakout / donchian entry_window=30 (M3)",
+        "pnl_pct": 86.4846,
+        "sharpe": 2.4862,
+        "mdd_pct": 25.2216,
+        "trade_count": 35,
+        "hit_rate": 0.5,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-05-11T10:29:52Z",
+        "validated_at": "2026-06-04T14:34:14Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/4 perturb_med=60.37% wf=5/8 regime=4/5",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=75.57% wf=4/6 regime=2/3",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:donchian-accumulation-breakout-1d:tf:15m:mut:entry-window-30-3ccd6a",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-06-04T16:21:26Z"
+    },
+    {
+      "id": "aether-02ecff5f2adc29",
+      "engine": "adx",
+      "params": {
+        "long_only": true,
+        "period": 7,
+        "threshold": 18
+      },
+      "probe_specs": [
+        {
+          "engine": "adx",
+          "params": {
+            "long_only": true,
+            "period": 7,
+            "threshold": 18
+          }
+        }
+      ],
+      "asset": "BTCUSDT",
+      "timeframe": "1d",
+      "score": 0.5126,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "ADX Trend Pullback 1D / adx_fast_tight (M1)",
+        "pnl_pct": 117.3923,
+        "sharpe": 0.9979,
+        "mdd_pct": 22.4013,
+        "trade_count": 58,
+        "hit_rate": 0.3793,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-06-04T11:09:27Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=2/3 perturb_med=97.86% wf=5/6 regime=4/4",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:adx-trend-pullback-1d:tf:1d:mut:llm-adx-fast-tight-46e588",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-06-04T16:21:26Z"
+    },
+    {
+      "id": "aether-ee5fbfc1aa1f1f",
+      "engine": "swing_pivot",
+      "params": {
+        "invalidation_buffer": 0.015,
+        "long_only": true,
+        "pullback_tolerance": 0.04,
+        "swing_lookback": 12,
+        "trend_ma": 55
+      },
+      "probe_specs": [
+        {
+          "engine": "swing_pivot",
+          "params": {
+            "invalidation_buffer": 0.015,
+            "long_only": true,
+            "pullback_tolerance": 0.04,
+            "swing_lookback": 12,
+            "trend_ma": 55
+          }
+        }
+      ],
+      "asset": "BNBUSDT",
+      "timeframe": "4h",
+      "score": 0.5252,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Swing Pivot Pullback Buy / trend_curto_filtro_medio (M1)",
+        "pnl_pct": 46.2484,
+        "sharpe": 0.9301,
+        "mdd_pct": 17.3638,
+        "trade_count": 51,
+        "hit_rate": 0.3333,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-06-04T16:37:03Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=3/3 perturb_med=44.72% wf=6/6 regime=5/5",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:swing-pivot-1d-pullback-buy:tf:4h:mut:llm-trend-curto-filtro-medio-0a4bf2",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-06-04T16:38:52Z"
+    },
+    {
+      "id": "aether-2ea20521f23c69",
+      "engine": "swing_pivot",
+      "params": {
+        "invalidation_buffer": 0.015,
+        "long_only": true,
+        "pullback_tolerance": 0.04,
+        "swing_lookback": 7,
+        "trend_ma": 21
+      },
+      "probe_specs": [
+        {
+          "engine": "swing_pivot",
+          "params": {
+            "invalidation_buffer": 0.015,
+            "long_only": true,
+            "pullback_tolerance": 0.04,
+            "swing_lookback": 7,
+            "trend_ma": 21
+          }
+        }
+      ],
+      "asset": "DOGEUSDT",
+      "timeframe": "4h",
+      "score": 0.6392,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Swing Pivot Pullback Buy / trend_curto_pullback_frouxo (M1)",
+        "pnl_pct": 289.9697,
+        "sharpe": 1.8262,
+        "mdd_pct": 23.2429,
+        "trade_count": 76,
+        "hit_rate": 0.2368,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-06-04T16:41:14Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=2/3 perturb_med=273.45% wf=5/6 regime=5/5",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:swing-pivot-1d-pullback-buy:tf:4h:mut:llm-trend-curto-filtro-medio-0a4bf2:mut:llm-tighter-retest-e4d50f:mut:llm-trend-curto-pullback-frouxo-f913ba",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-06-04T16:42:15Z"
+    },
+    {
+      "id": "aether-6dabaaa2315949",
+      "engine": "combo",
+      "params": {
+        "mode": "consensus",
+        "specs": [
+          {
+            "engine": "regime_filter",
+            "params": {
+              "long_only": false,
+              "ma_window": 200,
+              "method": "trend_align",
+              "slope_window": 20,
+              "vol_percentile_max": 80,
+              "vol_window": 50
+            }
+          },
+          {
+            "engine": "williams_r",
+            "params": {
+              "long_only": false,
+              "overbought": -10,
+              "oversold": -90,
+              "period": 21
+            }
+          }
+        ]
+      },
+      "probe_specs": [
+        {
+          "engine": "regime_filter",
+          "params": {
+            "long_only": false,
+            "ma_window": 200,
+            "method": "trend_align",
+            "slope_window": 20,
+            "vol_percentile_max": 80,
+            "vol_window": 50
+          }
+        },
+        {
+          "engine": "williams_r",
+          "params": {
+            "long_only": false,
+            "overbought": -10,
+            "oversold": -90,
+            "period": 21
+          }
+        }
+      ],
+      "asset": "ETHUSDT",
+      "timeframe": "4h",
+      "score": 0.5489,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Williams %R Extreme + Trend Align / 4h",
+        "pnl_pct": 120.1309,
+        "sharpe": 1.4097,
+        "mdd_pct": 28.5054,
+        "trade_count": 73,
+        "hit_rate": 0.5342,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-05-12T10:22:34Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=121.19% wf=5/6 regime=3/5",
         "combo_count": 6
       },
-      "source_node_id": "llmhyp:stochastic-divergence-4h:tf:4h",
+      "source_node_id": "llmhyp:williams-r-extreme-trend-align:tf:4h",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-06-04T15:13:14Z"
+      "deployed_at": "2026-06-04T16:42:15Z"
+    },
+    {
+      "id": "aether-af15801ef30a9b",
+      "engine": "swing_pivot",
+      "params": {
+        "invalidation_buffer": 0.015,
+        "long_only": true,
+        "pullback_tolerance": 0.035,
+        "swing_lookback": 14,
+        "trend_ma": 55
+      },
+      "probe_specs": [
+        {
+          "engine": "swing_pivot",
+          "params": {
+            "invalidation_buffer": 0.015,
+            "long_only": true,
+            "pullback_tolerance": 0.035,
+            "swing_lookback": 14,
+            "trend_ma": 55
+          }
+        }
+      ],
+      "asset": "BNBUSDT",
+      "timeframe": "4h",
+      "score": 0.5474,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Swing Pivot Pullback Buy / trend_shorter_pullback_tighter (M1)",
+        "pnl_pct": 48.6117,
+        "sharpe": 1.0791,
+        "mdd_pct": 13.9594,
+        "trade_count": 39,
+        "hit_rate": 0.3077,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-06-04T16:41:14Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=3/3 perturb_med=48.61% wf=5/6 regime=5/5",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:swing-pivot-1d-pullback-buy:tf:4h:mut:llm-trend-curto-filtro-medio-0a4bf2:mut:llm-deeper-swing-b18ca3:mut:llm-trend-shorter-pullback-tighter-8f33a",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-06-04T16:42:15Z"
     }
   ]
 }
