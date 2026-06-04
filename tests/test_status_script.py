@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +39,19 @@ def test_process_summary_detects_duplicate_roots_and_optional_promote_loop():
     assert duplicate_summary["flag"] == "DUP"
     assert promote_off["flag"] == "OFF"
     assert promote_running["flag"] == "RISCO"
+
+
+def test_show_processes_reports_query_error_instead_of_false_missing(monkeypatch, capsys):
+    def fake_run(*_args, **_kwargs):
+        return SimpleNamespace(returncode=1, stdout="", stderr="Acesso negado")
+
+    monkeypatch.setattr(status.subprocess, "run", fake_run)
+
+    status.show_processes()
+
+    out = capsys.readouterr().out
+    assert "consulta de processos indisponivel" in out
+    assert "[FALTA] aether.server" not in out
 
 
 def _make_productivity_db(path: Path) -> None:

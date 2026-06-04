@@ -281,10 +281,11 @@ def _focus_budget_for(assessment: dict[str, Any]) -> int | None:
     completion = float(assessment.get("focus_completion_ratio") or 0.0)
     reject_rate = float(assessment.get("critic_reject_rate") or 0.0)
     running_tasks = int(assessment.get("running_tasks") or 0)
+    focus_open = int(assessment.get("focus_open_count") or 0)
     if completion < 0.55 or reject_rate >= 0.60:
         return FOCUS_BUDGET_MIN
     if assessment.get("verdict") == "stuck" and completion >= 0.70 and reject_rate <= 0.25:
-        productive_budget = max(FOCUS_BUDGET_STUCK, running_tasks * 2)
+        productive_budget = max(FOCUS_BUDGET_STUCK, running_tasks * 2, focus_open + 1)
         return min(FOCUS_BUDGET_MAX, productive_budget)
     if assessment.get("verdict") == "stuck" and completion >= 0.80:
         return min(FOCUS_BUDGET_MAX, FOCUS_BUDGET_STUCK)

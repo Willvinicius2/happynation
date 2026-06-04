@@ -240,6 +240,29 @@ def test_hyper_agent_scales_focus_budget_for_productive_stuck_backlog():
     assert controls["focus_open_budget"] <= hyper_agent.FOCUS_BUDGET_MAX
 
 
+def test_hyper_agent_keeps_productive_stuck_budget_above_open_focus():
+    from src.research.aether import hyper_agent
+
+    controls = hyper_agent.decide(
+        {
+            "verdict": "stuck",
+            "diversity": 0.9,
+            "dominance_pct": 22.0,
+            "best_age_min": 11000.0,
+            "critic_reject_rate": 0.08,
+            "active_count": 300,
+            "focus_open_count": 36,
+            "focus_actionable_total": 120,
+            "focus_completion_ratio": 0.95,
+            "running_tasks": 12,
+            "queued_tasks": 0,
+        },
+        None,
+    )
+
+    assert controls["focus_open_budget"] > controls["focus_open_count"]
+
+
 def test_hyper_agent_keeps_focus_budget_conservative_when_quality_drops():
     from src.research.aether import hyper_agent
 

@@ -48,6 +48,7 @@ AETHER_HEALTH_EVENTS = {
     "web_backoff": "web_research_backoff",
     "restart_requeued": "restart_requeued_tasks",
 }
+PROCESS_QUERY_ERROR = ""
 EXPECTED_PROCESS_MODULES = [
     "aether.server",
     "aether.auto_validator",
@@ -69,6 +70,8 @@ def section(title: str) -> None:
 
 def list_aether_processes() -> list[dict]:
     """Lista processos python aether via PowerShell."""
+    global PROCESS_QUERY_ERROR
+    PROCESS_QUERY_ERROR = ""
     cmd = [
         "powershell", "-NoProfile", "-Command",
         "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
@@ -83,13 +86,15 @@ def list_aether_processes() -> list[dict]:
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if out.returncode != 0:
+            PROCESS_QUERY_ERROR = (out.stderr or out.stdout or f"exit={out.returncode}").strip()
             return []
         data = out.stdout.strip()
         if not data:
             return []
         parsed = json.loads(data)
         return [parsed] if isinstance(parsed, dict) else parsed
-    except Exception:
+    except Exception as exc:
+        PROCESS_QUERY_ERROR = f"{type(exc).__name__}: {exc}"
         return []
 
 
@@ -162,6 +167,10 @@ def format_process_summary(summary: dict) -> str:
 def show_processes() -> None:
     section("PROCESSOS ATIVOS")
     procs = list_aether_processes()
+    if not procs and PROCESS_QUERY_ERROR:
+        message = PROCESS_QUERY_ERROR.replace("\r", " ").replace("\n", " ")
+        print(f"  [INFO ] consulta de processos indisponivel: {message[:180]}")
+        return
     by_module: dict[str, list[dict]] = defaultdict(list)
     for p in procs:
         by_module[p.get("Module", "other")].append(p)
