@@ -1578,6 +1578,35 @@ def _run_queued_scouts(workers: int, max_tasks: int) -> None:
             node_dict = dict(node) if node else {}
             campaign_id = node_dict.get("campaign_id") or task["campaign_id"]
 
+            if not node_dict.get("id"):
+                update_task_status(
+                    conn,
+                    task_id,
+                    "stale",
+                    error="node missing before scout_sweep",
+                )
+                set_agent_status(
+                    conn,
+                    role,
+                    "standby",
+                    current_task_id=None,
+                    stats={
+                        "bubble": "Task scout orfa cancelada.",
+                        "reason": "node ausente",
+                        "node_id": node_id,
+                    },
+                )
+                add_event(
+                    conn,
+                    type="orphan_task_cancelled",
+                    campaign_id=campaign_id,
+                    node_id=node_id,
+                    agent_role=role,
+                    message=f"Task scout {task_id} cancelada: node {node_id} nao existe mais.",
+                    payload={"task_id": task_id, "node_id": node_id},
+                )
+                continue
+
             update_task_status(conn, task_id, "running", attempts_delta=1)
             set_agent_status(
                 conn,
@@ -1621,6 +1650,11 @@ def _run_queued_scouts(workers: int, max_tasks: int) -> None:
             )
             for probe in probes:
                 all_probes.append({**probe, "_task_id": task_id, "_node_id": node_id, "_agent_role": role})
+
+    if not task_infos:
+        with connect() as conn:
+            mark_agents_without_work_standby(conn)
+        return
 
     last_progress_write = {"t": 0.0}
 

@@ -239,6 +239,39 @@ def test_queue_scout_tasks_extends_batch_to_hit_probe_target(tmp_path, monkeypat
     assert task_count == 3
 
 
+def test_run_queued_scouts_marks_missing_node_task_stale(tmp_path, monkeypatch):
+    from src.research.aether import orchestrator
+
+    monkeypatch.setenv("AETHER_RUNTIME_DIR", str(tmp_path))
+    init_db()
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("orphan scout task should not run sweep")
+
+    monkeypatch.setattr(orchestrator, "run_sweep", fail_if_called)
+
+    with connect() as conn:
+        create_task(
+            conn,
+            node_id="missing-node",
+            agent_role="agent_5m_scalp",
+            task_type="scout_sweep",
+            priority=0.9,
+            payload={"probes": [{"engine": "rsi", "params": {"period": 14}}]},
+            task_id="orphan-task",
+        )
+
+    orchestrator._run_queued_scouts(workers=1, max_tasks=5)
+
+    with connect() as conn:
+        task = conn.execute("SELECT status, error FROM tasks WHERE id='orphan-task'").fetchone()
+        events = [row["type"] for row in conn.execute("SELECT type FROM events ORDER BY id")]
+
+    assert dict(task) == {"status": "stale", "error": "node missing before scout_sweep"}
+    assert "orphan_task_cancelled" in events
+    assert "task_failed" not in events
+
+
 def test_continuous_research_sidecar_treats_sqlite_lock_as_busy(tmp_path, monkeypatch):
     from src.research.aether import orchestrator
 
