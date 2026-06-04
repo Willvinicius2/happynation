@@ -40,6 +40,14 @@ AETHER_RANKING_URL = (
     "?capital=1000&limit=250&campaign_id=active&dedupe=true&hide_blocked=false&discoveries_limit=80"
 )
 AUTO_DEPLOY_DETAIL_KEYS = ("gate", "record", "blocklist", "caps", "cap_detail")
+AETHER_HEALTH_EVENTS = {
+    "task_failed": "task_failed",
+    "continuous_error": "continuous_research_error",
+    "cycle_busy": "cycle_database_busy",
+    "continuous_busy": "continuous_research_busy",
+    "web_backoff": "web_research_backoff",
+    "restart_requeued": "restart_requeued_tasks",
+}
 EXPECTED_PROCESS_MODULES = [
     "aether.server",
     "aether.auto_validator",
@@ -335,6 +343,30 @@ def read_hyper_controls(conn: sqlite3.Connection) -> dict:
     return safe_json_loads(row["value_json"]) if row else {}
 
 
+def recent_event_health(conn: sqlite3.Connection, cutoff: str) -> dict[str, dict[str, object]]:
+    placeholders = ",".join("?" for _ in AETHER_HEALTH_EVENTS)
+    labels_by_type = {event_type: label for label, event_type in AETHER_HEALTH_EVENTS.items()}
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT type, COUNT(*) AS n, MAX(ts) AS latest
+            FROM events
+            WHERE ts >= ?
+              AND type IN ({placeholders})
+            GROUP BY type
+            """,
+            (cutoff, *AETHER_HEALTH_EVENTS.values()),
+        ).fetchall()
+    except sqlite3.Error:
+        rows = []
+    health = {label: {"count": 0, "latest": ""} for label in AETHER_HEALTH_EVENTS}
+    for row in rows:
+        label = labels_by_type.get(str(row["type"] or ""))
+        if label:
+            health[label] = {"count": int(row["n"] or 0), "latest": str(row["latest"] or "")}
+    return health
+
+
 def latest_aether_productivity_snapshot(
     db: Path | None = None,
     *,
@@ -365,6 +397,7 @@ def latest_aether_productivity_snapshot(
         "critic_rejected": 0,
         "tasks": {},
         "task_runtime": {},
+        "health": {},
         "hyper": {},
     }
     with sqlite3.connect(str(db_file), timeout=10.0) as conn:
@@ -405,6 +438,7 @@ def latest_aether_productivity_snapshot(
                 snapshot["critic_rejected"] += 1
         snapshot["tasks"] = task_status_counts(conn, cutoff)
         snapshot["task_runtime"] = task_runtime_details(conn, now)
+        snapshot["health"] = recent_event_health(conn, cutoff)
         snapshot["hyper"] = read_hyper_controls(conn)
     return snapshot
 
@@ -464,6 +498,18 @@ def show_aether_productivity() -> None:
     if running_by_agent:
         top_agents = sorted(running_by_agent.items(), key=lambda item: (-int(item[1]), str(item[0])))[:6]
         print("  tasks por agente: " + " ".join(f"{agent}={count}" for agent, count in top_agents))
+    health = snapshot.get("health") or {}
+    if health:
+        health_order = ("task_failed", "continuous_error", "cycle_busy", "continuous_busy", "web_backoff", "restart_requeued")
+        health_parts = []
+        for key in health_order:
+            item = health.get(key) or {}
+            try:
+                count = int(item.get("count") or 0)
+            except (TypeError, ValueError):
+                count = 0
+            health_parts.append(f"{key}={count}")
+        print("  saude recente: " + " ".join(health_parts))
     hyper = snapshot.get("hyper") or {}
     if hyper:
         print(

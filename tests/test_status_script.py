@@ -61,6 +61,9 @@ def _make_productivity_db(path: Path) -> None:
                 ("2026-06-01T17:25:00Z", "llm_research_completed", json.dumps({"created": 1})),
                 ("2026-06-01T17:30:00Z", "critic_approved", "{}"),
                 ("2026-06-01T17:31:00Z", "critic_rejected", "{}"),
+                ("2026-06-01T17:40:00Z", "continuous_research_busy", "{}"),
+                ("2026-06-01T17:45:00Z", "web_research_backoff", "{}"),
+                ("2026-06-01T16:30:00Z", "task_failed", "{}"),
                 (
                     "2026-06-01T16:00:00Z",
                     "research_completed",
@@ -118,6 +121,9 @@ def test_aether_productivity_snapshot_summarizes_recent_agent_work(tmp_path):
     assert snapshot["tasks"] == {"queued": 1, "running": 2, "recent_completed": 1}
     assert snapshot["task_runtime"]["oldest_running_age_min"] == 5.0
     assert snapshot["task_runtime"]["running_by_agent"] == {"agent_1m": 1, "agent_5m": 1}
+    assert snapshot["health"]["task_failed"]["count"] == 0
+    assert snapshot["health"]["continuous_busy"]["count"] == 1
+    assert snapshot["health"]["web_backoff"]["count"] == 1
     assert snapshot["hyper"]["verdict"] == "stuck"
 
 
@@ -139,6 +145,7 @@ def test_show_aether_productivity_prints_hyper_and_task_health(tmp_path, monkeyp
     assert "critic: approved=1 rejected=1 reject_rate=50.0%" in out
     assert "tasks: queued=1 recent_completed=1 running=2 oldest_running=" in out
     assert "tasks por agente: agent_1m=1 agent_5m=1" in out
+    assert "saude recente: task_failed=0 continuous_error=0 cycle_busy=0 continuous_busy=1 web_backoff=1 restart_requeued=0" in out
     assert "hyper: verdict=stuck every=2" in out
 
 
