@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aether / RAIO</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260522-agent-map-v2">
+  <link rel="stylesheet" href="/static/styles.css?v=20260604-forge-board">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 </head>
@@ -153,6 +153,182 @@
 
       <section id="mindmapView" class="mindmapView hidden">
         <div id="mermaidContainer" style="display:none;"></div>
+        <section class="forgeOps" aria-label="Painel operacional de pesquisa Aether">
+          <aside class="forgeControlRail" aria-label="Controle da pesquisa">
+            <div class="forgeSectionTitle">Control rail</div>
+            <button class="forgeAction start" type="button" data-click-target="continuousBtn">Start</button>
+            <button class="forgeAction pause" type="button" data-click-target="cycleBtn">1 ciclo</button>
+            <button class="forgeAction stop" type="button" data-click-target="stopBtn">Parar</button>
+            <button class="forgeAction plan" type="button" data-click-target="rankingViewBtn">Ranking</button>
+
+            <div class="forgeSectionTitle budget">Budget locks</div>
+            <div class="forgeBudget"><span>CPU</span><strong id="forgeBudgetCpu">--</strong><i id="forgeBudgetCpuBar"></i></div>
+            <div class="forgeBudget"><span>Testes</span><strong id="forgeBudgetTests">--</strong><i id="forgeBudgetTestsBar"></i></div>
+            <div class="forgeBudget"><span>Dados</span><strong id="forgeBudgetData">--</strong><i id="forgeBudgetDataBar"></i></div>
+            <div class="forgeBudget"><span>Wall</span><strong id="forgeBudgetWall">--</strong><i id="forgeBudgetWallBar"></i></div>
+
+            <div class="forgeSectionTitle budget">Kill switch</div>
+            <button class="forgeEmergency" type="button" data-click-target="stopBtn">Parar ciclo</button>
+          </aside>
+
+          <section class="forgeConveyor" aria-label="Research conveyor">
+            <header class="forgeStatusStrip">
+              <span>Run heartbeat <strong id="forgeHeartbeat">--</strong></span>
+              <span>Active loop <strong id="forgeLoopId">AETHER</strong></span>
+              <span>Source drift <strong id="forgeDrift">--</strong></span>
+            </header>
+            <div class="forgeTitleRow">
+              <div>
+                <span class="forgeEyebrow">Research conveyor</span>
+                <h2>Aether strategy factory</h2>
+              </div>
+              <div class="forgeMiniStats">
+                <span><strong id="forgeAgents">--</strong> agentes</span>
+                <span><strong id="forgeRunning">--</strong> rodando</span>
+                <span><strong id="forgeQueued">--</strong> fila</span>
+              </div>
+            </div>
+
+            <div class="forgeBelt" id="forgeBelt">
+              <article class="forgeStage generated">
+                <span class="forgeIcon">LLM</span>
+                <strong>Batch</strong>
+                <small>hipoteses novas</small>
+              </article>
+              <article class="forgeStage valid">
+                <span class="forgeIcon">OK</span>
+                <strong>Schema</strong>
+                <small>validacao</small>
+              </article>
+              <article class="forgeStage queue">
+                <span class="forgeIcon">Q</span>
+                <strong>Queue</strong>
+                <small>prioridade</small>
+              </article>
+              <article class="forgeStage running">
+                <span class="forgeIcon">CPU</span>
+                <strong>Test factory</strong>
+                <small>workers</small>
+              </article>
+              <article class="forgeStage survived">
+                <span class="forgeIcon">WF</span>
+                <strong>Gates</strong>
+                <small>robustez</small>
+              </article>
+              <article class="forgeStage mixed">
+                <span class="forgeIcon">DEP</span>
+                <strong>Promote</strong>
+                <small>deploy caps</small>
+              </article>
+              <article class="forgeStage context">
+                <span class="forgeIcon">CTX</span>
+                <strong>Context</strong>
+                <small>proxima leva</small>
+              </article>
+            </div>
+
+            <div class="forgeMetricGrid" id="forgeMetricGrid">
+              <article class="forgeMetric complete">
+                <span>Generated</span>
+                <strong id="forgeGenerated">--</strong>
+                <small id="forgeGeneratedHint">--</small>
+                <div class="forgeProgress"><i id="forgeGeneratedBar"></i></div>
+                <em>complete</em>
+              </article>
+              <article class="forgeMetric pass">
+                <span>Valid</span>
+                <strong id="forgeValid">--</strong>
+                <small id="forgeValidHint">--</small>
+                <div class="forgeProgress"><i id="forgeValidBar"></i></div>
+                <em>pass</em>
+              </article>
+              <article class="forgeMetric ready">
+                <span>Queued</span>
+                <strong id="forgeQueuedMetric">--</strong>
+                <small id="forgeQueuedHint">--</small>
+                <div class="forgeProgress"><i id="forgeQueuedBar"></i></div>
+                <em>ready</em>
+              </article>
+              <article class="forgeMetric running">
+                <span>Running</span>
+                <strong id="forgeRunningMetric">--</strong>
+                <small id="forgeRunningHint">--</small>
+                <div class="forgeProgress"><i id="forgeRunningBar"></i></div>
+                <em>running</em>
+              </article>
+              <article class="forgeMetric pass">
+                <span>Survived</span>
+                <strong id="forgeSurvived">--</strong>
+                <small id="forgeSurvivedHint">--</small>
+                <div class="forgeProgress"><i id="forgeSurvivedBar"></i></div>
+                <em>passing</em>
+              </article>
+              <article class="forgeMetric mixed">
+                <span>Blocked / promoted</span>
+                <strong><b id="forgeBlocked">--</b><b id="forgePromoted">--</b></strong>
+                <small id="forgePromoteHint">--</small>
+                <div class="forgeProgress dual"><i id="forgeBlockedBar"></i><i id="forgePromotedBar"></i></div>
+                <em>mixed</em>
+              </article>
+              <article class="forgeMetric running">
+                <span>Context</span>
+                <strong id="forgeContext">--</strong>
+                <small id="forgeContextHint">--</small>
+                <div class="forgeProgress"><i id="forgeContextBar"></i></div>
+                <em>building</em>
+              </article>
+            </div>
+
+            <div class="forgeLegend" aria-label="Legenda de status">
+              <span><i class="good"></i>Good / promoted</span>
+              <span><i class="run"></i>Running</span>
+              <span><i class="warn"></i>Warn / budget</span>
+              <span><i class="bad"></i>Blocked / fail</span>
+            </div>
+
+            <section class="forgeWorkers" aria-label="CPU workers">
+              <header>
+                <strong>CPU workers</strong>
+                <span>Total utilization <b id="forgeUtilization">--</b></span>
+              </header>
+              <div id="forgeWorkerRows" class="forgeWorkerRows"></div>
+            </section>
+          </section>
+
+          <aside class="forgeEvidence" aria-label="Live evidence feed">
+            <div class="forgeSectionTitle">Live evidence feed</div>
+            <div class="forgeEvidenceBlock">
+              <span>Tested this loop</span>
+              <strong id="forgeTested">--</strong>
+              <small id="forgeTestedHint">symbols / timeframes</small>
+            </div>
+            <div class="forgeGauge">
+              <span>Survivor rate</span>
+              <strong id="forgeSurvivorRate">--</strong>
+              <div class="forgeArc"><i id="forgeSurvivorArc"></i></div>
+              <small>target >= 20%</small>
+            </div>
+            <div class="forgeEvidenceBlock">
+              <span>Search-space risk</span>
+              <strong id="forgeRisk">--</strong>
+              <small id="forgeRiskHint">drift vs. prior loop</small>
+            </div>
+            <div class="forgeEvidenceBlock budgets">
+              <span>Remaining budgets</span>
+              <ul>
+                <li><i></i>CPU <strong id="forgeRemainCpu">--</strong></li>
+                <li><i></i>Testes <strong id="forgeRemainTests">--</strong></li>
+                <li><i></i>Dados <strong id="forgeRemainData">--</strong></li>
+                <li><i></i>Wall <strong id="forgeRemainWall">--</strong></li>
+              </ul>
+            </div>
+            <div class="forgeEvidenceBlock blocker">
+              <span>Latest blocker</span>
+              <strong id="forgeLatestBlocker">--</strong>
+              <small id="forgeLatestBlockerHint">--</small>
+            </div>
+          </aside>
+        </section>
         <div class="agentMapHero" aria-label="Mapa interativo do Aether">
           <div>
             <div class="agentMapEyebrow">Aether cockpit vivo</div>
@@ -242,6 +418,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=20260522-agent-map-v2"></script>
+  <script src="/static/app.js?v=20260604-forge-board"></script>
 </body>
 </html>

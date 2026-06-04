@@ -602,6 +602,164 @@ function renderHealth(h) {
     : `<div class="reasonRow"><span>sem podas registradas</span><strong>0</strong></div>`;
 }
 
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value == null || value === "" ? "--" : String(value);
+}
+
+function setBar(id, value) {
+  const el = $(id);
+  if (!el) return;
+  const pct = clamp(Number(value) || 0, 0, 100);
+  el.style.width = `${pct.toFixed(1)}%`;
+  if (id === "forgeSurvivorArc" && el.parentElement) {
+    el.parentElement.style.setProperty("--rate", `${(pct / 2).toFixed(1)}%`);
+  }
+}
+
+function latestByTs(rows, key = "updated_at") {
+  return rows
+    .filter((row) => row && row[key])
+    .slice()
+    .sort((a, b) => String(b[key] || "").localeCompare(String(a[key] || "")))[0] || null;
+}
+
+function renderForgeOps(data, health) {
+  const root = document.querySelector(".forgeOps");
+  if (!root) return;
+
+  const tasks = data.tasks || [];
+  const agents = data.agents || [];
+  const nodes = (data.nodes || []).filter((n) => n.id !== "root" && !String(n.id).startsWith("tf:"));
+  const runs = data.runs || [];
+  const events = data.events || [];
+  const runtime = data.runtime || {};
+  const hyper = data.hyper_controls || {};
+  const defaultWorkers = Math.max(1, Number(runtime.default_workers || 1));
+  const queuedTasks = tasks.filter((t) => t.status === "queued").length;
+  const runningTasks = tasks.filter((t) => t.status === "running").length;
+  const completedTasks = tasks.filter((t) => t.status === "completed").length;
+  const failedTasks = tasks.filter((t) => t.status === "failed").length;
+  const activeAgents = agents.filter((a) => a.status === "running").length;
+  const validated = nodes.filter((n) => n.status === "validated").length;
+  const pruned = nodes.filter((n) => ["pruned", "paused", "archive"].includes(n.status)).length;
+  const generated = nodes.length;
+  const approved = nodes.filter((n) => n.metrics?.critic_status === "approved").length;
+  const rejected = nodes.filter((n) => n.metrics?.critic_status === "rejected").length;
+  const recentTrace = latestByTs(data.llm_traces || [], "created_at");
+  const latestRun = latestByTs(runs, "updated_at") || latestByTs(runs, "started_at");
+  const latestEvent = events[0] || null;
+  const blocker = events.find((e) => /blocked|backoff|busy|failed|rejected|pruned|lock/i.test(`${e.type || ""} ${e.message || ""}`));
+  const runCompleted = Number(latestRun?.completed || 0);
+  const runTotal = Number(latestRun?.total || 0);
+  const runPct = runTotal > 0 ? (runCompleted / runTotal) * 100 : 0;
+  const survivorTotal = validated + pruned;
+  const survivorRate = survivorTotal > 0 ? (validated / survivorTotal) * 100 : 0;
+  const cpuPct = Math.min(100, (runningTasks / defaultWorkers) * 100);
+  const focusBudget = Number(hyper.focus_open_budget || 0);
+  const focusOpen = Number(hyper.focus_open_count || 0);
+  const focusRemain = focusBudget ? Math.max(0, focusBudget - focusOpen) : null;
+  const latestTs = parseTs(hyper.last_seen_at || hyper.updated_at || latestEvent?.ts);
+  const traceTs = parseTs(recentTrace?.created_at || recentTrace?.updated_at);
+
+  setText("forgeHeartbeat", latestTs ? ageHuman(Date.now() - latestTs) : "--");
+  setText("forgeDrift", health?.dominant ? `${health.dominant.name} ${health.dominantPct.toFixed(0)}%` : "baixo");
+  setText("forgeAgents", `${activeAgents}/${agents.length}`);
+  setText("forgeRunning", runningTasks);
+  setText("forgeQueued", queuedTasks);
+
+  setText("forgeGenerated", generated);
+  setText("forgeGeneratedHint", `${health.counts?.active || 0} ativos / ${pruned} arquivados`);
+  setBar("forgeGeneratedBar", generated ? 100 : 0);
+  setText("forgeValid", validated);
+  setText("forgeValidHint", `${approved} critic OK / ${rejected} recusados`);
+  setBar("forgeValidBar", generated ? (validated / generated) * 100 : 0);
+  setText("forgeQueuedMetric", queuedTasks);
+  setText("forgeQueuedHint", queuedTasks ? "aguardando worker" : "fila limpa");
+  setBar("forgeQueuedBar", Math.min(100, queuedTasks * 8));
+  setText("forgeRunningMetric", runningTasks);
+  setText("forgeRunningHint", `${completedTasks} concluidas / ${failedTasks} falhas no snapshot`);
+  setBar("forgeRunningBar", cpuPct);
+  setText("forgeSurvived", validated);
+  setText("forgeSurvivedHint", survivorTotal ? `${survivorRate.toFixed(1)}% sobrevivem` : "sem amostra");
+  setBar("forgeSurvivedBar", survivorRate);
+  setText("forgeBlocked", pruned);
+  setText("forgePromoted", approved);
+  setText("forgePromoteHint", `${rejected} critic rejeitou`);
+  setBar("forgeBlockedBar", generated ? (pruned / generated) * 100 : 0);
+  setBar("forgePromotedBar", generated ? (approved / generated) * 100 : 0);
+  setText("forgeContext", data.llm_traces?.length || 0);
+  setText("forgeContextHint", traceTs ? `ultimo LLM ${ageHuman(Date.now() - traceTs)}` : "sem trace recente");
+  setBar("forgeContextBar", data.llm_traces?.length ? 100 : 0);
+
+  setText("forgeBudgetCpu", `${runningTasks}/${defaultWorkers}`);
+  setText("forgeBudgetTests", runTotal ? `${runCompleted}/${runTotal}` : `${completedTasks}`);
+  setText("forgeBudgetData", data.nodes_truncated ? `${data.nodes.length}/${data.nodes_total}` : `${data.nodes_total || data.nodes.length}`);
+  setText("forgeBudgetWall", runtime.cycle_running ? runtime.cycle_mode || "ativo" : "standby");
+  setBar("forgeBudgetCpuBar", cpuPct);
+  setBar("forgeBudgetTestsBar", runPct);
+  setBar("forgeBudgetDataBar", data.nodes_truncated ? (data.nodes.length / Math.max(1, Number(data.nodes_total || data.nodes.length))) * 100 : 100);
+  setBar("forgeBudgetWallBar", runtime.cycle_running ? 100 : 0);
+  setText("forgeRemainCpu", Math.max(0, defaultWorkers - runningTasks));
+  setText("forgeRemainTests", runTotal ? Math.max(0, runTotal - runCompleted) : queuedTasks);
+  setText("forgeRemainData", focusRemain == null ? (data.nodes_truncated ? Math.max(0, Number(data.nodes_total || 0) - Number(data.nodes.length || 0)) : "ok") : focusRemain);
+  setText("forgeRemainWall", runtime.stop_requested ? "stop" : (runtime.cycle_running ? "loop" : "standby"));
+
+  setText("forgeTested", runTotal ? runCompleted : completedTasks);
+  setText("forgeTestedHint", latestRun ? `${latestRun.status || "run"} / ${latestRun.worker_count || defaultWorkers} workers` : "sem run recente");
+  setText("forgeSurvivorRate", `${survivorRate.toFixed(1)}%`);
+  setBar("forgeSurvivorArc", survivorRate);
+  setText("forgeRisk", health.verdict || "balanced");
+  setText("forgeRiskHint", hyper.force_exploration_every ? `explora a cada ${hyper.force_exploration_every}` : health.hint);
+  setText("forgeLatestBlocker", blocker ? shortText(blocker.type, 32) : "nenhum");
+  setText("forgeLatestBlockerHint", blocker ? shortText(blocker.message || blocker.ts, 92) : "sem bloqueio recente no feed");
+  setText("forgeUtilization", `${cpuPct.toFixed(0)}%`);
+
+  const workerRows = $("forgeWorkerRows");
+  if (workerRows) {
+    workerRows.innerHTML = agents.slice(0, 10).map((agent) => {
+      const running = agent.status === "running";
+      const label = running ? "running" : agent.status || "standby";
+      return `
+        <div class="forgeWorker ${running ? "running" : "standby"}">
+          <span>${escapeHtml(agent.label || agent.role || agent.kind || "agent")}</span>
+          <strong>${escapeHtml(label)}</strong>
+        </div>
+      `;
+    }).join("");
+  }
+
+  for (const item of root.querySelectorAll(".forgeStage")) item.classList.remove("active", "warn");
+  if (generated) root.querySelector(".forgeStage.generated")?.classList.add("active");
+  if (validated) root.querySelector(".forgeStage.valid")?.classList.add("active");
+  if (queuedTasks) root.querySelector(".forgeStage.queue")?.classList.add("warn");
+  if (runningTasks) root.querySelector(".forgeStage.running")?.classList.add("active");
+  if (validated) root.querySelector(".forgeStage.survived")?.classList.add("active");
+  if (approved || pruned) root.querySelector(".forgeStage.mixed")?.classList.add(approved ? "active" : "warn");
+  if (data.llm_traces?.length) root.querySelector(".forgeStage.context")?.classList.add("active");
+
+  const startBtn = root.querySelector('[data-click-target="continuousBtn"]');
+  if (startBtn) {
+    startBtn.textContent = runtime.cycle_running ? "Rodando" : "Start";
+    startBtn.disabled = Boolean(runtime.cycle_running && runtime.cycle_mode === "continuous");
+  }
+  const stopButtons = root.querySelectorAll('[data-click-target="stopBtn"]');
+  for (const btn of stopButtons) btn.disabled = !runtime.cycle_running;
+}
+
+function setupForgeActions() {
+  const root = document.querySelector(".forgeOps");
+  if (!root) return;
+  for (const btn of root.querySelectorAll("[data-click-target]")) {
+    if (btn.dataset.bound === "1") continue;
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", () => {
+      const target = $(btn.dataset.clickTarget);
+      if (target && !target.disabled) target.click();
+    });
+  }
+}
+
 function statusClass(status) {
   if (!status) return "candidate";
   if (["pruned", "paused"].includes(status)) return "pruned";
@@ -2020,7 +2178,9 @@ async function refresh() {
   state.prunerTargets = activity.prunerTargets;
   state.recentPrunedIds = activity.recentPrunedIds;
   renderCampaignOptions();
-  renderHealth(computeHealth(state.data));
+  const health = computeHealth(state.data);
+  renderHealth(health);
+  renderForgeOps(state.data, health);
   renderTree();
   renderSidebars();
   renderStats();
@@ -2147,6 +2307,7 @@ $("treeViewBtn").onclick = () => { state.viewMode = "tree"; window.location.hash
 $("mindmapViewBtn").onclick = () => { state.viewMode = "mindmap"; window.location.hash = "mindmap"; syncViewMode(); };
 $("rankingViewBtn").onclick = () => { state.viewMode = "ranking"; window.location.hash = "ranking"; syncViewMode(); };
 if ($("agentMapSelectPassingBtn")) $("agentMapSelectPassingBtn").onclick = () => selectPassingStrategies();
+setupForgeActions();
 for (const btn of document.querySelectorAll("[data-ranking-tab]")) {
   btn.addEventListener("click", () => setRankingTab(btn.dataset.rankingTab));
 }
