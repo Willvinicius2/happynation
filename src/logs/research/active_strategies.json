@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-01T16:25:48Z",
+  "updated_at": "2026-06-04T03:24:54Z",
   "strategies": [
     {
       "id": "aether-f02dbf58d6c9ef",
@@ -1635,83 +1635,6 @@
       "deployed_at": "2026-05-28T20:04:50Z"
     },
     {
-      "id": "aether-6dabaaa2315949",
-      "engine": "combo",
-      "params": {
-        "mode": "consensus",
-        "specs": [
-          {
-            "engine": "regime_filter",
-            "params": {
-              "long_only": false,
-              "ma_window": 200,
-              "method": "trend_align",
-              "slope_window": 20,
-              "vol_percentile_max": 80,
-              "vol_window": 50
-            }
-          },
-          {
-            "engine": "williams_r",
-            "params": {
-              "long_only": false,
-              "overbought": -10,
-              "oversold": -90,
-              "period": 21
-            }
-          }
-        ]
-      },
-      "probe_specs": [
-        {
-          "engine": "regime_filter",
-          "params": {
-            "long_only": false,
-            "ma_window": 200,
-            "method": "trend_align",
-            "slope_window": 20,
-            "vol_percentile_max": 80,
-            "vol_window": 50
-          }
-        },
-        {
-          "engine": "williams_r",
-          "params": {
-            "long_only": false,
-            "overbought": -10,
-            "oversold": -90,
-            "period": 21
-          }
-        }
-      ],
-      "asset": "ETHUSDT",
-      "timeframe": "4h",
-      "score": 0.5489,
-      "risk": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": 2.0,
-        "max_hold_candles": 96
-      },
-      "summary": {
-        "name": "Williams %R Extreme + Trend Align / 4h",
-        "pnl_pct": 120.1309,
-        "sharpe": 1.4097,
-        "mdd_pct": 28.5054,
-        "trade_count": 73,
-        "hit_rate": 0.5342,
-        "validation_passed": true,
-        "validation_stage": "walk_forward",
-        "validated_at": "2026-05-12T10:22:34Z",
-        "validated_by": "auto_validator",
-        "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=121.19% wf=5/6 regime=3/5",
-        "combo_count": 6
-      },
-      "source_node_id": "llmhyp:williams-r-extreme-trend-align:tf:4h",
-      "source": "aether_auto_deploy",
-      "deployed_at": "2026-05-29T03:49:10Z"
-    },
-    {
       "id": "aether-91853d50e5b043",
       "engine": "keltner",
       "params": {
@@ -2040,7 +1963,97 @@
       "deployed_at": "2026-05-29T11:52:10Z"
     },
     {
-      "id": "aether-f409de9fabdd73",
+      "id": "aether-66df6851367674",
+      "engine": "vwap_dev",
+      "params": {
+        "long_only": true,
+        "window": 6,
+        "z_threshold": 2.8
+      },
+      "probe_specs": [
+        {
+          "engine": "vwap_dev",
+          "params": {
+            "long_only": true,
+            "window": 6,
+            "z_threshold": 2.8
+          }
+        }
+      ],
+      "asset": "LINKUSDT",
+      "timeframe": "1d",
+      "score": 0.5715,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "VWAP Deviation Mean Fade 15m / short_fast (M1)",
+        "pnl_pct": 86.7422,
+        "sharpe": 1.3284,
+        "mdd_pct": 13.0003,
+        "trade_count": 30,
+        "hit_rate": 0.8,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-06-01T21:23:47Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=46.76% wf=6/6 regime=4/4",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:vwap-dev-reversion-15m-meanfade:tf:1d:mut:llm-long-bias-fast-d591b4:mut:llm-fast-pulse-dd85a6:mut:llm-short-fast-8499b7",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-06-01T21:27:35Z"
+    },
+    {
+      "id": "aether-a2022d0a18ffce",
+      "engine": "donchian",
+      "params": {
+        "entry_window": 10,
+        "exit_window": 10,
+        "long_only": false
+      },
+      "probe_specs": [
+        {
+          "engine": "donchian",
+          "params": {
+            "entry_window": 10,
+            "exit_window": 10,
+            "long_only": false
+          }
+        }
+      ],
+      "asset": "BNBUSDT",
+      "timeframe": "15m",
+      "score": 0.6556,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Donchian 15m Release / donchian exit_window=10 (M3)",
+        "pnl_pct": 35.0452,
+        "sharpe": 1.8265,
+        "mdd_pct": 13.0018,
+        "trade_count": 44,
+        "hit_rate": 0.4884,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-06-02T01:41:10Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=31.92% wf=6/6 regime=3/3",
+        "combo_count": 0
+      },
+      "source_node_id": "llmhyp:donchian-15m-release:tf:15m:mut:entry-window-30-15f632:mut:entry-window-55-eb0097:mut:entry-window-10-d93fcd:mut:exit-window-10-4b58fa",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-06-02T01:42:51Z"
+    },
+    {
+      "id": "aether-3a5db024a414dd",
       "engine": "donchian",
       "params": {
         "entry_window": 20,
@@ -2059,75 +2072,150 @@
       ],
       "asset": "BNBUSDT",
       "timeframe": "15m",
-      "score": 0.6248,
+      "score": 0.6356,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Donchian Weekly Escape / donchian exit_window=5 (M2)",
-        "pnl_pct": 26.2818,
-        "sharpe": 1.5713,
+        "name": "Donchian 15m Release / donchian exit_window=5 (M3)",
+        "pnl_pct": 28.1952,
+        "sharpe": 1.6567,
         "mdd_pct": 13.0018,
         "trade_count": 45,
         "hit_rate": 0.5227,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-06-01T16:13:20Z",
+        "validated_at": "2026-06-02T01:42:11Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=2/3 perturb_med=28.48% wf=6/6 regime=3/3",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=30.43% wf=6/6 regime=3/3",
         "combo_count": 0
       },
-      "source_node_id": "llmhyp:donchian-weekly-escape:tf:15m:mut:entry-window-10-959443:mut:entry-window-20-617644:mut:exit-window-5-73deaa",
+      "source_node_id": "llmhyp:donchian-15m-release:tf:15m:mut:entry-window-10-d93fcd:mut:entry-window-20-3260cd:mut:exit-window-5-73deaa",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-06-01T16:18:48Z"
+      "deployed_at": "2026-06-02T01:47:52Z"
     },
     {
-      "id": "aether-12b6382b7b0433",
-      "engine": "donchian",
+      "id": "aether-9c84988e0062a3",
+      "engine": "combo",
       "params": {
-        "entry_window": 30,
-        "exit_window": 5,
-        "long_only": false
+        "mode": "consensus",
+        "specs": [
+          {
+            "engine": "macd",
+            "params": {
+              "fast": 12,
+              "long_only": false,
+              "signal": 9,
+              "slow": 26
+            }
+          },
+          {
+            "engine": "vwap_dev",
+            "params": {
+              "long_only": false,
+              "window": 48,
+              "z_threshold": 1.5
+            }
+          }
+        ]
       },
       "probe_specs": [
         {
-          "engine": "donchian",
+          "engine": "macd",
           "params": {
-            "entry_window": 30,
-            "exit_window": 5,
-            "long_only": false
+            "fast": 12,
+            "long_only": false,
+            "signal": 9,
+            "slow": 26
+          }
+        },
+        {
+          "engine": "vwap_dev",
+          "params": {
+            "long_only": false,
+            "window": 48,
+            "z_threshold": 1.5
           }
         }
       ],
-      "asset": "BNBUSDT",
-      "timeframe": "15m",
-      "score": 0.5633,
+      "asset": "AVAXUSDT",
+      "timeframe": "4h",
+      "score": 0.6522,
       "risk": {
         "take_profit_pct": 10.0,
         "stop_loss_pct": 2.0,
         "max_hold_candles": 96
       },
       "summary": {
-        "name": "Donchian Weekly Escape / donchian exit_window=5 (M2)",
-        "pnl_pct": 20.9558,
-        "sharpe": 1.4067,
-        "mdd_pct": 13.1922,
-        "trade_count": 37,
-        "hit_rate": 0.5278,
+        "name": "MACD + VWAP reversal apos impulso / 4h",
+        "pnl_pct": 63.807,
+        "sharpe": 1.2523,
+        "mdd_pct": 19.6285,
+        "trade_count": 118,
+        "hit_rate": 0.7034,
         "validation_passed": true,
         "validation_stage": "walk_forward",
-        "validated_at": "2026-06-01T16:13:20Z",
+        "validated_at": "2026-06-02T04:35:13Z",
         "validated_by": "auto_validator",
         "critic_status": "approved",
-        "critic_reason": "approved cross_pass=1/3 perturb_med=17.77% wf=4/6 regime=3/3",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=69.32% wf=5/6 regime=4/5",
+        "combo_count": 9
+      },
+      "source_node_id": "llmhyp:macd-vwap-reversal-post-impulse:tf:4h",
+      "source": "aether_auto_deploy",
+      "deployed_at": "2026-06-02T04:37:33Z"
+    },
+    {
+      "id": "aether-85ed4798b2a09e",
+      "engine": "vol_compression",
+      "params": {
+        "atr_window": 34,
+        "breakout_window": 55,
+        "long_only": true,
+        "percentile_max": 18,
+        "percentile_window": 126
+      },
+      "probe_specs": [
+        {
+          "engine": "vol_compression",
+          "params": {
+            "atr_window": 34,
+            "breakout_window": 55,
+            "long_only": true,
+            "percentile_max": 18,
+            "percentile_window": 126
+          }
+        }
+      ],
+      "asset": "BTCUSDT",
+      "timeframe": "4h",
+      "score": 0.5003,
+      "risk": {
+        "take_profit_pct": 10.0,
+        "stop_loss_pct": 2.0,
+        "max_hold_candles": 96
+      },
+      "summary": {
+        "name": "Vol Compression 1h Breakout Release / trend_filtro_longo (M1)",
+        "pnl_pct": 34.794,
+        "sharpe": 0.7385,
+        "mdd_pct": 19.8406,
+        "trade_count": 61,
+        "hit_rate": 0.3279,
+        "validation_passed": true,
+        "validation_stage": "walk_forward",
+        "validated_at": "2026-06-02T01:16:50Z",
+        "validated_by": "auto_validator",
+        "critic_status": "approved",
+        "critic_reason": "approved cross_pass=1/3 perturb_med=34.79% wf=6/6 regime=2/5",
         "combo_count": 0
       },
-      "source_node_id": "llmhyp:donchian-weekly-escape:tf:15m:mut:entry-window-10-959443:mut:entry-window-30-118c02:mut:exit-window-5-0fe7b2",
+      "source_node_id": "llmhyp:vol-compression-1h-breakout-release:tf:4h:mut:llm-trend-filtro-longo-c922cb",
       "source": "aether_auto_deploy",
-      "deployed_at": "2026-06-01T16:25:48Z"
+      "deployed_at": "2026-06-04T03:24:54Z"
     }
   ]
 }
