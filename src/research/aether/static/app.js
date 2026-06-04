@@ -635,12 +635,20 @@ function renderForgeOps(data, health) {
   const events = data.events || [];
   const runtime = data.runtime || {};
   const hyper = data.hyper_controls || {};
+  const graphStats = _agentsGraphLast?.stats || {};
   const defaultWorkers = Math.max(1, Number(runtime.default_workers || 1));
-  const queuedTasks = tasks.filter((t) => t.status === "queued").length;
-  const runningTasks = tasks.filter((t) => t.status === "running").length;
+  const queuedTasks = Math.max(
+    tasks.filter((t) => t.status === "queued").length,
+    Number(graphStats.queued_tasks || 0),
+  );
+  const runningTasks = Math.max(
+    tasks.filter((t) => t.status === "running").length,
+    Number(graphStats.running_tasks || 0),
+  );
   const completedTasks = tasks.filter((t) => t.status === "completed").length;
   const failedTasks = tasks.filter((t) => t.status === "failed").length;
   const activeAgents = agents.filter((a) => a.status === "running").length;
+  const activeWorkers = activeAgents || Math.min(defaultWorkers, runningTasks);
   const validated = nodes.filter((n) => n.status === "validated").length;
   const pruned = nodes.filter((n) => ["pruned", "paused", "archive"].includes(n.status)).length;
   const generated = nodes.length;
@@ -655,7 +663,7 @@ function renderForgeOps(data, health) {
   const runPct = runTotal > 0 ? (runCompleted / runTotal) * 100 : 0;
   const survivorTotal = validated + pruned;
   const survivorRate = survivorTotal > 0 ? (validated / survivorTotal) * 100 : 0;
-  const cpuPct = Math.min(100, (runningTasks / defaultWorkers) * 100);
+  const cpuPct = Math.min(100, (activeWorkers / defaultWorkers) * 100);
   const focusBudget = Number(hyper.focus_open_budget || 0);
   const focusOpen = Number(hyper.focus_open_count || 0);
   const focusRemain = focusBudget ? Math.max(0, focusBudget - focusOpen) : null;
@@ -665,7 +673,7 @@ function renderForgeOps(data, health) {
   setText("forgeHeartbeat", latestTs ? ageHuman(Date.now() - latestTs) : "--");
   setText("forgeDrift", health?.dominant ? `${health.dominant.name} ${health.dominantPct.toFixed(0)}%` : "baixo");
   setText("forgeAgents", `${activeAgents}/${agents.length}`);
-  setText("forgeRunning", runningTasks);
+  setText("forgeRunning", activeWorkers);
   setText("forgeQueued", queuedTasks);
 
   setText("forgeGenerated", generated);
@@ -677,8 +685,8 @@ function renderForgeOps(data, health) {
   setText("forgeQueuedMetric", queuedTasks);
   setText("forgeQueuedHint", queuedTasks ? "aguardando worker" : "fila limpa");
   setBar("forgeQueuedBar", Math.min(100, queuedTasks * 8));
-  setText("forgeRunningMetric", runningTasks);
-  setText("forgeRunningHint", `${completedTasks} concluidas / ${failedTasks} falhas no snapshot`);
+  setText("forgeRunningMetric", `${activeWorkers}/${defaultWorkers}`);
+  setText("forgeRunningHint", runningTasks ? `${runningTasks} tarefas vivas / ${completedTasks} concluidas` : `${completedTasks} concluidas / ${failedTasks} falhas no snapshot`);
   setBar("forgeRunningBar", cpuPct);
   setText("forgeSurvived", validated);
   setText("forgeSurvivedHint", survivorTotal ? `${survivorRate.toFixed(1)}% sobrevivem` : "sem amostra");
@@ -692,7 +700,7 @@ function renderForgeOps(data, health) {
   setText("forgeContextHint", traceTs ? `ultimo LLM ${ageHuman(Date.now() - traceTs)}` : "sem trace recente");
   setBar("forgeContextBar", data.llm_traces?.length ? 100 : 0);
 
-  setText("forgeBudgetCpu", `${runningTasks}/${defaultWorkers}`);
+  setText("forgeBudgetCpu", `${activeWorkers}/${defaultWorkers}`);
   setText("forgeBudgetTests", runTotal ? `${runCompleted}/${runTotal}` : `${completedTasks}`);
   setText("forgeBudgetData", data.nodes_truncated ? `${data.nodes.length}/${data.nodes_total}` : `${data.nodes_total || data.nodes.length}`);
   setText("forgeBudgetWall", runtime.cycle_running ? runtime.cycle_mode || "ativo" : "standby");
@@ -700,7 +708,7 @@ function renderForgeOps(data, health) {
   setBar("forgeBudgetTestsBar", runPct);
   setBar("forgeBudgetDataBar", data.nodes_truncated ? (data.nodes.length / Math.max(1, Number(data.nodes_total || data.nodes.length))) * 100 : 100);
   setBar("forgeBudgetWallBar", runtime.cycle_running ? 100 : 0);
-  setText("forgeRemainCpu", Math.max(0, defaultWorkers - runningTasks));
+  setText("forgeRemainCpu", Math.max(0, defaultWorkers - activeWorkers));
   setText("forgeRemainTests", runTotal ? Math.max(0, runTotal - runCompleted) : queuedTasks);
   setText("forgeRemainData", focusRemain == null ? (data.nodes_truncated ? Math.max(0, Number(data.nodes_total || 0) - Number(data.nodes.length || 0)) : "ok") : focusRemain);
   setText("forgeRemainWall", runtime.stop_requested ? "stop" : (runtime.cycle_running ? "loop" : "standby"));
@@ -717,11 +725,15 @@ function renderForgeOps(data, health) {
 
   const workerRows = $("forgeWorkerRows");
   if (workerRows) {
-    workerRows.innerHTML = agents.slice(0, 10).map((agent) => {
+    const visibleAgents = agents.slice().sort((a, b) => {
+      const order = { running: 0, queued: 1, failed: 2, standby: 3 };
+      return (order[a.status] ?? 4) - (order[b.status] ?? 4);
+    });
+    workerRows.innerHTML = visibleAgents.slice(0, 12).map((agent) => {
       const running = agent.status === "running";
-      const label = running ? "running" : agent.status || "standby";
+      const label = running ? shortText(agent.current_task_id || agent.stats?.phase || "running", 26) : (agent.status || "standby");
       return `
-        <div class="forgeWorker ${running ? "running" : "standby"}">
+        <div class="forgeWorker ${running ? "running" : "standby"}" title="${escapeHtml(agent.current_task_id || agent.stats?.bubble || agent.status || "")}">
           <span>${escapeHtml(agent.label || agent.role || agent.kind || "agent")}</span>
           <strong>${escapeHtml(label)}</strong>
         </div>
@@ -733,7 +745,7 @@ function renderForgeOps(data, health) {
   if (generated) root.querySelector(".forgeStage.generated")?.classList.add("active");
   if (validated) root.querySelector(".forgeStage.valid")?.classList.add("active");
   if (queuedTasks) root.querySelector(".forgeStage.queue")?.classList.add("warn");
-  if (runningTasks) root.querySelector(".forgeStage.running")?.classList.add("active");
+  if (activeWorkers || runningTasks) root.querySelector(".forgeStage.running")?.classList.add("active");
   if (validated) root.querySelector(".forgeStage.survived")?.classList.add("active");
   if (approved || pruned) root.querySelector(".forgeStage.mixed")?.classList.add(approved ? "active" : "warn");
   if (data.llm_traces?.length) root.querySelector(".forgeStage.context")?.classList.add("active");
@@ -1901,6 +1913,117 @@ function renderAgentsGraphDetail(graphNode) {
   `;
 }
 
+const STRATEGIC_AGENT_ROLES = new Set([
+  "chief_orchestrator",
+  "hypothesis_generator",
+  "auto_validator",
+  "critic_agent",
+  "hyper_agent",
+  "auto_deploy",
+  "scorekeeper",
+]);
+const MAX_PASSING_GRAPH_NODES = 6;
+const MAX_WORK_GRAPH_NODES = 6;
+const WORK_NODES_PER_ROLE = 1;
+
+function agentRoleFromGraphId(id) {
+  const text = String(id || "");
+  if (text.startsWith("agent::")) return text.slice("agent::".length);
+  if (text.startsWith("last::")) return text.split("::")[1] || "";
+  return "";
+}
+
+function simplifyAgentsGraph(res) {
+  const rawNodes = res?.nodes || [];
+  const rawEdges = res?.edges || [];
+  if (!rawNodes.length) return res;
+
+  const byId = new Map(rawNodes.map((node) => [node.id, node]));
+  const keep = new Set();
+  const add = (id) => {
+    if (byId.has(id)) keep.add(id);
+  };
+  const selectedNodeId = res?.stats?.selected_node_id || "";
+  const selectedGraphId = res?.stats?.selected_graph_id || "";
+  const hasLiveAgents = rawNodes.some((node) => {
+    if (!String(node.id || "").startsWith("agent::")) return false;
+    const status = node.detail?.status || "";
+    const tasks = Array.isArray(node.detail?.tasks) ? node.detail.tasks : [];
+    return status === "running" || status === "queued" || tasks.length;
+  });
+
+  add("__root__");
+  add(selectedGraphId);
+  if (selectedNodeId) add(`stage::generated::${selectedNodeId}`);
+
+  for (const node of rawNodes) {
+    const id = String(node.id || "");
+    if (id.startsWith("stage::")) add(node.id);
+    if (id.startsWith("strategy_event::")) add(node.id);
+
+    if (id.startsWith("agent::")) {
+      const role = agentRoleFromGraphId(id);
+      const status = node.detail?.status || "";
+      const tasks = Array.isArray(node.detail?.tasks) ? node.detail.tasks : [];
+      if (status === "running" || status === "queued" || tasks.length || (!hasLiveAgents && STRATEGIC_AGENT_ROLES.has(role))) {
+        add(node.id);
+      }
+    }
+  }
+
+  rawNodes
+    .filter((node) => String(node.id || "").startsWith("passing::"))
+    .slice(0, MAX_PASSING_GRAPH_NODES)
+    .forEach((node) => add(node.id));
+
+  const workByRole = new Map();
+  for (const node of rawNodes) {
+    const id = String(node.id || "");
+    if (!id.startsWith("work::") && node.detail?.kind !== "work") continue;
+    const status = node.detail?.task?.status || "";
+    if (status !== "running" && status !== "queued") continue;
+    const role = node.detail?.task?.role || node.detail?.role || "unknown";
+    const items = workByRole.get(role) || [];
+    items.push(node);
+    workByRole.set(role, items);
+  }
+  let keptWorkNodes = 0;
+  for (const items of workByRole.values()) {
+    if (keptWorkNodes >= MAX_WORK_GRAPH_NODES) break;
+    items
+      .sort((a, b) => {
+        const aRunning = a.detail?.task?.status === "running" ? 0 : 1;
+        const bRunning = b.detail?.task?.status === "running" ? 0 : 1;
+        return aRunning - bRunning;
+      })
+      .slice(0, WORK_NODES_PER_ROLE)
+      .forEach((node) => {
+        if (keptWorkNodes >= MAX_WORK_GRAPH_NODES) return;
+        add(node.id);
+        keptWorkNodes += 1;
+      });
+  }
+
+  for (const edge of rawEdges) {
+    if (keep.has(edge.to) && !keep.has(edge.from) && String(edge.from || "").startsWith("agent::")) add(edge.from);
+    if (keep.has(edge.from) && !keep.has(edge.to) && String(edge.to || "").startsWith("agent::")) add(edge.to);
+  }
+
+  const nodes = rawNodes.filter((node) => keep.has(node.id));
+  const edges = rawEdges.filter((edge) => keep.has(edge.from) && keep.has(edge.to));
+  return {
+    ...res,
+    layout: "strategic_compact",
+    nodes,
+    edges,
+    stats: {
+      ...(res.stats || {}),
+      visual_nodes: nodes.length,
+      visual_edges: edges.length,
+    },
+  };
+}
+
 function updateAgentsGraphData(res) {
   if (!_agentsNetwork || !_agentsNetData) return;
   const incomingNodes = res.nodes || [];
@@ -2026,7 +2149,8 @@ async function refreshMindmap(force = false) {
   }
   try {
     await _waitForVis();
-    const res = await api("/api/agents_graph?limit_per_agent=4");
+    const rawRes = await api("/api/agents_graph?limit_per_agent=4");
+    const res = simplifyAgentsGraph(rawRes);
     _agentsGraphLast = res;
     const stats = $("agentsGraphStats");
     const graphStats = res.stats || {};
@@ -2045,7 +2169,7 @@ async function refreshMindmap(force = false) {
         `${graphStats.running_tasks || 0} tarefas`,
         `${graphStats.queued_tasks || 0} na fila`,
         `${graphStats.passing_strategies || 0} passando`,
-        `${graphStats.work_items || 0} blocos de trabalho`,
+        `${graphStats.visual_nodes || graphStats.nodes || 0} blocos no mapa`,
       ].join(" / ");
     }
     renderMindmapFocus(res);

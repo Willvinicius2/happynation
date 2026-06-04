@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from src.research.aether.campaign_constants import CURRENT_CAMPAIGN_ID
-from src.research.aether.db import connect, init_db, set_setting
+from src.research.aether.db import add_event, connect, init_db, set_setting
 from src.research.aether.repository import create_task, upsert_node
 
 
@@ -270,6 +270,27 @@ def test_run_queued_scouts_marks_missing_node_task_stale(tmp_path, monkeypatch):
     assert dict(task) == {"status": "stale", "error": "node missing before scout_sweep"}
     assert "orphan_task_cancelled" in events
     assert "task_failed" not in events
+
+
+def test_agents_graph_does_not_flag_zero_failures_completion_as_error(tmp_path, monkeypatch):
+    from src.research.aether.server_agents_graph import _build_agents_action_graph
+
+    monkeypatch.setenv("AETHER_RUNTIME_DIR", str(tmp_path))
+    init_db()
+
+    with connect() as conn:
+        add_event(
+            conn,
+            type="task_completed",
+            agent_role="agent_1h",
+            message="Scout concluido: 9/9 probes, 0 falhas.",
+            node_id="node-ok",
+        )
+
+    graph = _build_agents_action_graph(limit_per_agent=4)
+    signals = graph["stats"]["signals"]
+
+    assert all(signal["label"] != "Ultimo erro" for signal in signals)
 
 
 def test_continuous_research_sidecar_treats_sqlite_lock_as_busy(tmp_path, monkeypatch):

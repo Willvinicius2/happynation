@@ -462,11 +462,26 @@ def _build_agents_action_graph(limit_per_agent: int) -> dict[str, Any]:
                 return event
         return None
 
+    def latest_event_where(predicate: Any) -> dict[str, Any] | None:
+        for event in event_rows:
+            if predicate(event):
+                return event
+        return None
+
+    def is_error_event(event: dict[str, Any]) -> bool:
+        event_type = str(event.get("type") or "").lower()
+        if any(token in event_type for token in ("error", "failed", "exception")):
+            return True
+        message = str(event.get("message") or "").lower()
+        if "0 falha" in message or "0 failure" in message:
+            return False
+        return any(token in message for token in ("erro", "error", "exception", "falha tecnica", "failed"))
+
     oldest_running_task = None
     running_task_rows = [task for task in task_rows if task.get("status") == "running"]
     if running_task_rows:
         oldest_running_task = sorted(running_task_rows, key=lambda task: str(task.get("updated_at") or ""))[0]
-    latest_error = latest_event_matching("error", "failed", "falha", "exception")
+    latest_error = latest_event_where(is_error_event)
     latest_prune = latest_event_matching("pruned", "hard_deleted", "poda", "paused")
     latest_deploy = latest_event_matching("deploy", "manifest", "ranking_deployed")
     latest_critic = latest_event_matching("critic")
