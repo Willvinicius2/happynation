@@ -248,6 +248,47 @@ def test_web_research_commits_before_external_collection(tmp_path, monkeypatch):
     assert result["created_hypotheses"] == 0
 
 
+def test_web_research_uses_offline_seed_when_external_sources_empty(monkeypatch):
+    from src.research.aether import web_research
+
+    monkeypatch.setattr(web_research, "search_web", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(web_research, "search_arxiv", lambda *_args, **_kwargs: [])
+
+    sources = web_research.collect_web_sources(max_queries=2, per_query=2)
+    specs = web_research.strategy_specs_from_sources(sources, max_specs=4)
+
+    assert sources
+    assert {source["source"] for source in sources} == {"offline_seed"}
+    assert {spec["slug"] for spec in specs} >= {
+        "web-microstructure-flow-proxy",
+        "web-adaptive-trend-risk",
+    }
+
+
+def test_web_research_offline_seed_creates_hypothesis_batch(tmp_path, monkeypatch):
+    from src.research.aether import web_research
+
+    monkeypatch.setattr(web_research, "search_web", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(web_research, "search_arxiv", lambda *_args, **_kwargs: [])
+    db = init_db(tmp_path / "aether.sqlite3")
+
+    with connect(db) as conn:
+        result = web_research.create_web_hypothesis_batch(conn, max_new=1)
+        parent = conn.execute(
+            """
+            SELECT metrics_json
+            FROM nodes
+            WHERE source_type='web_research' AND parent_id='root'
+            LIMIT 1
+            """
+        ).fetchone()
+
+    metrics = json.loads(parent["metrics_json"])
+    assert result["created_hypotheses"] == 1
+    assert result["source_count"] > 0
+    assert metrics["source"] == "offline_seed"
+
+
 def test_web_research_maps_microstructure_sources_to_proxy_specs():
     from src.research.aether.web_research import strategy_specs_from_sources
 

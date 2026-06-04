@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -27,6 +28,58 @@ ARXIV_QUERIES = [
     "all:cryptocurrency AND all:trading AND all:strategy",
     "all:crypto AND all:algorithmic AND all:trading",
     "all:market AND all:microstructure AND all:cryptocurrency",
+]
+
+OFFLINE_RESEARCH_SEEDS = [
+    {
+        "title": "Offline microstructure order-flow proxy seed",
+        "url": "offline://aether/research-seed/microstructure-flow-v1",
+        "snippet": "Order book, order flow imbalance, spread and trade features can expose stable cryptocurrency microstructure patterns; approximate with OBV, VWAP deviation and structure break candle proxies.",
+        "query": "offline fallback microstructure cryptocurrency order flow",
+        "source": "offline_seed",
+    },
+    {
+        "title": "Offline adaptive trend-risk seed",
+        "url": "offline://aether/research-seed/adaptive-trend-risk-v1",
+        "snippet": "Systematic trend-following, adaptive portfolio construction, trailing stop logic and rolling Sharpe selection can improve risk-adjusted crypto trading across regimes.",
+        "query": "offline fallback trend following adaptive risk",
+        "source": "offline_seed",
+    },
+    {
+        "title": "Offline Bollinger volatility squeeze seed",
+        "url": "offline://aether/research-seed/bollinger-squeeze-v1",
+        "snippet": "Bollinger volatility squeeze, breakout and mean reversion setups can capture compression followed by expansion in cryptocurrency markets.",
+        "query": "offline fallback bollinger breakout volatility squeeze",
+        "source": "offline_seed",
+    },
+    {
+        "title": "Offline RSI reversion recovery seed",
+        "url": "offline://aether/research-seed/rsi-reversion-v1",
+        "snippet": "RSI oversold and overbought mean reversion can identify short recovery windows after directional exhaustion in crypto assets.",
+        "query": "offline fallback RSI mean reversion oversold overbought",
+        "source": "offline_seed",
+    },
+    {
+        "title": "Offline sentiment extremity proxy seed",
+        "url": "offline://aether/research-seed/sentiment-extremity-v1",
+        "snippet": "Extreme fear, extreme greed, uncertainty and sentiment extremity premium can be approximated with MFI, VWAP deviation and high volatility fade filters.",
+        "query": "offline fallback sentiment fear greed extremity crypto",
+        "source": "offline_seed",
+    },
+    {
+        "title": "Offline adaptive parameter optimization seed",
+        "url": "offline://aether/research-seed/adaptive-parameter-sweep-v1",
+        "snippet": "Genetic algorithm optimization, adaptive strategy search and parameter optimization suggest testing robust parameter neighborhoods instead of one fixed fit.",
+        "query": "offline fallback genetic algorithm parameter optimization",
+        "source": "offline_seed",
+    },
+    {
+        "title": "Offline channel breakout seed",
+        "url": "offline://aether/research-seed/channel-breakout-v1",
+        "snippet": "Donchian channel breakout and recent range expansion can capture asymmetric crypto displacement when exits are short enough to reduce giveback.",
+        "query": "offline fallback channel breakout donchian crypto",
+        "source": "offline_seed",
+    },
 ]
 
 
@@ -176,6 +229,13 @@ def search_arxiv(query: str, *, max_results: int = 5, timeout: float = 15.0) -> 
     return results
 
 
+def offline_research_sources(*, limit: int = 8) -> list[dict[str, str]]:
+    enabled = os.getenv("AETHER_WEB_RESEARCH_OFFLINE_FALLBACK", "1").strip().lower()
+    if enabled not in {"1", "true", "yes", "sim", "on"}:
+        return []
+    return OFFLINE_RESEARCH_SEEDS[: max(0, limit)]
+
+
 def collect_web_sources(*, max_queries: int = 3, per_query: int = 4) -> list[dict[str, str]]:
     sources: list[dict[str, str]] = []
     seen = set()
@@ -205,6 +265,8 @@ def collect_web_sources(*, max_queries: int = 3, per_query: int = 4) -> list[dic
                 continue
             seen.add(url)
             sources.append(result)
+    if not sources:
+        sources.extend(offline_research_sources(limit=max(per_query, max_queries * per_query)))
     return sources
 
 
