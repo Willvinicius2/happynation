@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from types import SimpleNamespace
 from datetime import datetime, timezone
@@ -52,6 +53,16 @@ def test_show_processes_reports_query_error_instead_of_false_missing(monkeypatch
     out = capsys.readouterr().out
     assert "consulta de processos indisponivel" in out
     assert "[FALTA] aether.server" not in out
+
+
+def test_process_query_pattern_ignores_aether_diagnostic_scripts():
+    diagnostic = r"D:\openclaude\HAPPY\.venv\Scripts\python.exe -u scripts\aether_quick_status.py"
+    hyper = r"D:\openclaude\HAPPY\.venv\Scripts\python.exe -u -m src.research.aether.hyper_agent"
+    watchdog = r"D:\openclaude\HAPPY\.venv\Scripts\python.exe -u -m scripts._watchdog_stack"
+
+    assert re.search(status.PROCESS_COMMAND_PATTERN, diagnostic) is None
+    assert re.search(status.PROCESS_COMMAND_PATTERN, hyper)
+    assert re.search(status.PROCESS_COMMAND_PATTERN, watchdog)
 
 
 def _make_productivity_db(path: Path) -> None:

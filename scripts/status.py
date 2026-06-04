@@ -48,6 +48,10 @@ AETHER_HEALTH_EVENTS = {
     "web_backoff": "web_research_backoff",
     "restart_requeued": "restart_requeued_tasks",
 }
+PROCESS_COMMAND_PATTERN = (
+    r"src\.research\.aether|src\.main|src\.dashboard|"
+    r"aether_promote_with_validation|scripts\._watchdog_stack|_watchdog_stack"
+)
 PROCESS_QUERY_ERROR = ""
 EXPECTED_PROCESS_MODULES = [
     "aether.server",
@@ -75,7 +79,7 @@ def list_aether_processes() -> list[dict]:
     cmd = [
         "powershell", "-NoProfile", "-Command",
         "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-        "Where-Object { $_.CommandLine -match 'aether|src\\.main|src\\.dashboard|aether_promote|run_critic|scripts\\._watchdog_stack|_watchdog_stack' } | "
+        f"Where-Object {{ $_.CommandLine -match '{PROCESS_COMMAND_PATTERN}' }} | "
         "Select-Object ProcessId,ParentProcessId,@{N='Module';E={ if ($_.CommandLine -match 'src\\.research\\.aether\\.(\\w+)') { 'aether.' + $matches[1] } "
         "elseif ($_.CommandLine -match 'src\\.main') { 'bot' } "
         "elseif ($_.CommandLine -match 'aether_promote_with_validation') { 'promote_loop' } "
