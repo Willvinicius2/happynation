@@ -8,7 +8,7 @@
 #   .\scripts\run_aether_bg.ps1 -Stack     # idem run_aether_stack.ps1 (sem economy)
 #   .\scripts\run_aether_bg.ps1 -Bot       # adiciona o bot de trade (src.main)
 #   .\scripts\run_aether_bg.ps1 -Dashboard # adiciona o trade monitor (src.dashboard)
-#   .\scripts\run_aether_bg.ps1 -Restart   # encerra modulos iguais antes de subir
+#   .\scripts\run_aether_bg.ps1 -Restart   # encerra modulos iguais/watchdog antes de subir
 #
 # Para parar:  .\scripts\stop_aether.ps1
 # Para acompanhar logs:  .\scripts\tail_aether.ps1 server
@@ -164,6 +164,16 @@ if ($Dashboard) {
     $modules += @{ name = "dashboard"; module = "src.dashboard" }
 }
 
+$deployWatchdogEnabled = (-not $env:AETHER_DEPLOY_WATCHDOG) -or ($env:AETHER_DEPLOY_WATCHDOG.Trim().ToLowerInvariant() -in @("1", "true", "yes", "on"))
+$managedEntries = @($modules)
+if (($Full -or $Stack) -and $deployWatchdogEnabled) {
+    $managedEntries += @{
+        name = "watchdog"
+        module = "scripts._watchdog_stack"
+        pattern = '-m\s+scripts\._watchdog_stack(\s|$)|scripts[\\/]+_watchdog_stack\.py'
+    }
+}
+
 $moduleNames = ($modules | ForEach-Object { $_.name }) -join ", "
 $codexOnPath = [bool](Get-Command codex -ErrorAction SilentlyContinue)
 $codexExplicit = [bool]($env:AETHER_CODEX_CLI_PATH -and (Test-Path -LiteralPath $env:AETHER_CODEX_CLI_PATH))
@@ -203,7 +213,7 @@ function Get-ExistingModuleProcesses {
     $pythonProcs = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue)
     $found = @()
     foreach ($entry in $Entries) {
-        $pattern = "-m\s+$([regex]::Escape($entry.module))(\s|$)"
+        $pattern = if ($entry.ContainsKey("pattern")) { $entry.pattern } else { "-m\s+$([regex]::Escape($entry.module))(\s|$)" }
         foreach ($p in $pythonProcs) {
             $cmd = $p.CommandLine
             if ($cmd -and $cmd -match $pattern) {
@@ -219,10 +229,10 @@ function Get-ExistingModuleProcesses {
     return $found | Sort-Object Pid -Unique
 }
 
-$existing = @(Get-ExistingModuleProcesses -Entries $modules)
+$existing = @(Get-ExistingModuleProcesses -Entries $managedEntries)
 if ($existing.Count -gt 0) {
     if (-not $Restart) {
-        Write-Host "Ja existe processo Aether/bot para esta stack:" -ForegroundColor Yellow
+        Write-Host "Ja existe processo Aether/bot/watchdog para esta stack:" -ForegroundColor Yellow
         $existing | Select-Object Pid,Name,Module | Format-Table -AutoSize
         Write-Host "Use .\scripts\stop_aether.ps1 ou rode este script com -Restart." -ForegroundColor DarkGray
         exit 1
@@ -264,7 +274,6 @@ foreach ($entry in $modules) {
     Write-Host ("[OK] {0,-10} pid={1,-6} log={2}" -f $name, $proc.Id, $logPath) -ForegroundColor Green
 }
 
-$deployWatchdogEnabled = (-not $env:AETHER_DEPLOY_WATCHDOG) -or ($env:AETHER_DEPLOY_WATCHDOG.Trim().ToLowerInvariant() -in @("1", "true", "yes", "on"))
 if (($Full -or $Stack) -and $deployWatchdogEnabled) {
     $watchdogScript = Join-Path $root "scripts\_watchdog_stack.py"
     if (Test-Path $watchdogScript) {

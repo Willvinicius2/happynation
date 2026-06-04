@@ -10,6 +10,15 @@ def test_stack_launcher_exposes_codex_cli_path_for_powershell_runtime():
     assert "Test-Path" in script
 
 
+def test_background_launcher_restart_manages_deploy_watchdog():
+    script = Path("scripts/run_aether_bg.ps1").read_text(encoding="utf-8")
+
+    assert "$managedEntries = @($modules)" in script
+    assert "scripts._watchdog_stack" in script
+    assert "Get-ExistingModuleProcesses -Entries $managedEntries" in script
+    assert "Aether/bot/watchdog" in script
+
+
 def test_watchdog_uses_aether_runtime_dir(monkeypatch, tmp_path):
     monkeypatch.delenv("AETHER_DB_PATH", raising=False)
     monkeypatch.setenv("AETHER_RUNTIME_DIR", str(tmp_path))
