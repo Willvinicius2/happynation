@@ -120,6 +120,12 @@ REGRAS CRITICAS DE DIVERSIDADE (violacao = hipotese rejeitada):
 5. Mude mecanismo causal entre hipoteses — nao gere 5 variacoes do mesmo conceito; cada hipotese deve testar uma TESE DIFERENTE.
 6. Nao repita podadas/validadas; mude parametros de forma estrutural (faixas, nao tweaks).
 
+REGRAS DE ROBUSTEZ DO CRITIC (obrigatorias quando o feedback citar cross-symbol/walk-forward):
+- Cross-symbol: cada hipotese deve explicar no causal_mechanism POR QUE o sinal generaliza para pelo menos 3 alts liquidas, nao so para o simbolo original.
+- Walk-forward: prefira faixas estruturais e mecanismos invariantes; evite thresholds pontuais que so vencem uma janela.
+- Regime: inclua filtro ou invalidation que corte a tese quando o regime que sustenta o sinal desaparece.
+- Se voce nao consegue escrever esse plano de robustez em 1 frase, descarte a hipotese e gere outra.
+
 JSON:
 {{
   "hypotheses": [

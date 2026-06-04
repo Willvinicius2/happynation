@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 from src.research.aether.campaign_constants import CURRENT_CAMPAIGN_ID
-from src.research.aether.db import connect, init_db, set_setting
+from src.research.aether.db import add_event, connect, init_db, set_setting
 from src.research.aether.llm_hypothesis import _collect_exploration_context, create_llm_hypothesis_batch
 from src.research.aether.llm_runtime import call_llm_agent, role_provider
 from src.research.aether.repository import upsert_node
@@ -136,6 +136,32 @@ def test_llm_hypothesis_cooldown_ignores_failed_traces(tmp_path, monkeypatch):
 
     assert result.get("skipped") != "cooldown"
     assert called["count"] == 1
+
+
+def test_llm_hypothesis_prompt_includes_recent_critic_feedback(tmp_path, monkeypatch):
+    monkeypatch.setenv("AETHER_LLM_HYPOTHESIS_COOLDOWN_MINUTES", "0")
+    db = init_db(tmp_path / "aether.sqlite3")
+    captured = {}
+
+    def caller(*_args, **kwargs):
+        captured["prompt"] = kwargs["prompt"]
+        return {"ok": True, "provider": "test", "model": "test", "text": json.dumps({"hypotheses": []})}
+
+    with connect(db) as conn:
+        add_event(
+            conn,
+            type="critic_rejected",
+            campaign_id=CURRENT_CAMPAIGN_ID,
+            agent_role="critic_agent",
+            message="Critic rejeitou por robustez.",
+            payload={"reason": "cross-symbol falhou (0/3 alts com pnl>=-3.0%)"},
+        )
+
+        create_llm_hypothesis_batch(conn, caller=caller)
+
+    assert "FEEDBACK DO CRITIC" in captured["prompt"]
+    assert "cross-symbol falhou" in captured["prompt"]
+    assert "POR QUE o sinal generaliza para pelo menos 3 alts liquidas" in captured["prompt"]
 
 
 def test_web_research_empty_results_enter_backoff(tmp_path, monkeypatch):
