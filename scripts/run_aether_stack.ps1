@@ -58,13 +58,19 @@ if (-not $env:AETHER_DEPLOY_MAX_MDD_PCT)                   { $env:AETHER_DEPLOY_
 if (-not $env:AETHER_DEPLOY_TRADE_COUNT_WEIGHT)            { $env:AETHER_DEPLOY_TRADE_COUNT_WEIGHT = "0.35" }
 if (-not $env:AETHER_DEPLOY_PNL_WEIGHT)                    { $env:AETHER_DEPLOY_PNL_WEIGHT = "0.08" }
 if (-not $env:AETHER_DEPLOY_SHARPE_WEIGHT)                 { $env:AETHER_DEPLOY_SHARPE_WEIGHT = "0.08" }
+if (-not $env:AETHER_DEPLOY_MIN_HIT_RATE)                  { $env:AETHER_DEPLOY_MIN_HIT_RATE = "0.63" }
+if (-not $env:AETHER_DEPLOY_HIT_RATE_WEIGHT)               { $env:AETHER_DEPLOY_HIT_RATE_WEIGHT = "0.45" }
+if (-not $env:AETHER_DEPLOY_MAX_EST_TRADES_PER_DAY)        { $env:AETHER_DEPLOY_MAX_EST_TRADES_PER_DAY = "5.0" }
 if (-not $env:AETHER_DEPLOY_MDD_PENALTY)                   { $env:AETHER_DEPLOY_MDD_PENALTY = "0.10" }
 if (-not $env:AETHER_DEPLOY_FAST_TF_BONUS)                 { $env:AETHER_DEPLOY_FAST_TF_BONUS = "0.08" }
 
 if (-not $env:AETHER_DEPLOY_MAX_PER_FAMILY)                { $env:AETHER_DEPLOY_MAX_PER_FAMILY = "30" }
-if (-not $env:AETHER_DEPLOY_MAX_PER_ASSET)                 { $env:AETHER_DEPLOY_MAX_PER_ASSET = "12" }
-if (-not $env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF)       { $env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF = "5" }
+if (-not $env:AETHER_DEPLOY_MAX_PER_ASSET)                 { $env:AETHER_DEPLOY_MAX_PER_ASSET = "10" }
+if (-not $env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF)       { $env:AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF = "7" }
+if (-not $env:AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET)      { $env:AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET = "5" }
 if (-not $env:AETHER_DEPLOY_TOP_N)                         { $env:AETHER_DEPLOY_TOP_N = "80" }
+if (-not $env:AETHER_DEPLOY_MANAGED_SOURCES)               { $env:AETHER_DEPLOY_MANAGED_SOURCES = "aether_auto_deploy,aether_happynation,aether_manual_ranking_deploy" }
+if (-not $env:AETHER_DEPLOY_RESPECT_RANKING_RESET)         { $env:AETHER_DEPLOY_RESPECT_RANKING_RESET = "1" }
 
 $paramsForBg = @{ Stack = $true }
 if ($Restart) { $paramsForBg.Restart = $true }

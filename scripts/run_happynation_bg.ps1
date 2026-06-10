@@ -29,7 +29,9 @@ if ($AggressivePaper) {
     # Modo paper agressivo: usado somente quando queremos gerar amostras rapido.
     # Mantem o bot em paper, mas relaxa travas que normalmente impedem reentrada.
     $env:RISK_GUARD_ENABLED = "0"
+    $env:PAPER_DAILY_LOSS_GUARD_ENABLED = "0"
     $env:MAX_DAILY_LOSS_PCT = "100"
+    $env:PAPER_ASSET_DRAWDOWN_GUARD_ENABLED = "0"
     $env:MAX_ASSET_DRAWDOWN_PCT = "100"
     $env:MAX_GLOBAL_DRAWDOWN_PCT = "100"
     $env:MAX_OPEN_POSITIONS = "12"
@@ -51,7 +53,13 @@ if ($AggressivePaper) {
     # Modo padrao: paper protegido. O historico de entradas mostrou que voto
     # isolado + judge desligado deixava estrategias perdedoras reentrarem.
     $env:RISK_GUARD_ENABLED = "1"
+    # Inicialmente nao bloqueia por perda diaria; a metrica continua registrada
+    # para analise, enquanto drawdown global e sequencia de perdas seguem ativos.
+    $env:PAPER_DAILY_LOSS_GUARD_ENABLED = "0"
     $env:MAX_DAILY_LOSS_PCT = "3.0"
+    # Inicialmente tambem nao bloqueia pelo limite de drawdown "por ativo",
+    # porque hoje ele mede a mesma equity global. O circuit breaker global fica ativo.
+    $env:PAPER_ASSET_DRAWDOWN_GUARD_ENABLED = "0"
     $env:MAX_ASSET_DRAWDOWN_PCT = "4.0"
     $env:MAX_GLOBAL_DRAWDOWN_PCT = "5.0"
     $env:MAX_OPEN_POSITIONS = "4"

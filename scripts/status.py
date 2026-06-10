@@ -39,7 +39,7 @@ AETHER_RANKING_URL = (
     "http://127.0.0.1:8765/api/ranking"
     "?capital=1000&limit=250&campaign_id=active&dedupe=true&hide_blocked=false&discoveries_limit=80"
 )
-AUTO_DEPLOY_DETAIL_KEYS = ("gate", "record", "blocklist", "caps", "cap_detail")
+AUTO_DEPLOY_DETAIL_KEYS = ("gate", "record", "blocklist", "caps", "cap_detail", "ranking_reset")
 AETHER_HEALTH_EVENTS = {
     "task_failed": "task_failed",
     "continuous_error": "continuous_research_error",
@@ -649,6 +649,7 @@ def show_auto_deploy_flow() -> None:
     print_reason_group("blocklist", details.get("blocklist") or {})
     print_reason_group("caps", details.get("caps") or {})
     print_reason_group("caps detalhe", details.get("cap_detail") or {})
+    print_reason_group("ranking reset", details.get("ranking_reset") or {})
     print_reason_group("records invalidos", details.get("record") or {})
 
 

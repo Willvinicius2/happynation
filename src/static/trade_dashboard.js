@@ -220,8 +220,8 @@ function renderKills(data){
 }
 
 function renderPositionCards(data){
-  const positions = data.paper || [];
-  const open = positions.filter(p=>p.position).length;
+  const positions = (data.paper || []).filter(p=>p.position);
+  const open = positions.length;
   $("posCount").textContent = `${open} ${open===1?"aberta":"abertas"}`;
   $("assets").innerHTML = positions.length ? positions.map(a => {
     const dataAttrs = a.position
@@ -240,7 +240,7 @@ function renderPositionCards(data){
       </div>
       ${a.position ? `<div class="small" style="margin-top:10px">Entrada $${fmt(a.entry_price,4)} · Atual <span data-live="price">$${fmt(a.live_price||a.entry_price,4)}</span> · Qty ${fmt(a.qty,6)}</div>` : `<div class="small" style="margin-top:10px">Aguardando sinal · ${a.trades} trades · WR ${fmt(a.winrate,1)}%</div>`}
     </article>`;
-  }).join("") : `<div class="empty">Sem ativos no loop ainda.</div>`;
+  }).join("") : `<div class="empty">Nenhuma posicao aberta.</div>`;
 }
 
 function renderRichTable(){

@@ -797,6 +797,115 @@ def _signals_weekly_divergence(
     return sig
 
 
+def _signals_path_simulator(df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
+    """Bootstrap market-path simulator for long-only BTC/ETH style entries.
+
+    The signal at bar i uses only closed data up to i. The backtest/runtime
+    executes signals on the next bar, so this function must not inspect future
+    candles. It simulates horizon returns from the trailing return window and
+    enters only when probability, expectancy and tail-risk gates agree.
+    """
+    close = df["close"].astype(float).reset_index(drop=True)
+    n = len(close)
+    sig = pd.Series(0, index=df.index, dtype=int)
+    if n < 3:
+        return sig
+
+    lookback = max(64, int(params.get("lookback", 512)))
+    horizon = max(1, int(params.get("horizon", 16)))
+    paths = max(64, int(params.get("paths", 2000)))
+    block_size = max(1, int(params.get("block_size", 4)))
+    min_p_up = float(params.get("min_p_up", 0.58))
+    min_expected_pct = float(params.get("min_expected_pct", 0.25))
+    stop_loss_pct = max(0.05, float(params.get("stop_loss_pct", params.get("max_cvar_loss_pct", 1.20))))
+    max_stop_hit_prob = float(params.get("max_stop_hit_prob", 0.35))
+    max_cvar_loss_pct = float(params.get("max_cvar_loss_pct", 1.20))
+    roundtrip_cost_pct = max(0.0, float(params.get("roundtrip_cost_pct", 0.24)))
+    long_only = bool(params.get("long_only", True))
+    seed = int(params.get("seed", 1314))
+
+    trend_filter = bool(params.get("trend_filter", True))
+    trend_ma_window = max(20, int(params.get("trend_ma_window", 200)))
+    trend_slope_window = max(1, int(params.get("trend_slope_window", 12)))
+    min_trend_slope_pct = float(params.get("min_trend_slope_pct", 0.0))
+
+    close_arr = close.to_numpy(dtype=float)
+    positive = close_arr > 0
+    log_close = np.full(n, np.nan, dtype=float)
+    log_close[positive] = np.log(close_arr[positive])
+    log_ret = np.diff(log_close, prepend=np.nan)
+
+    trend_ma = close.rolling(trend_ma_window, min_periods=trend_ma_window).mean().to_numpy(dtype=float)
+    trend_slope = (
+        close.rolling(trend_ma_window, min_periods=trend_ma_window).mean()
+        .pct_change(trend_slope_window)
+        .mul(100.0)
+        .to_numpy(dtype=float)
+    )
+
+    min_required = max(lookback, trend_ma_window if trend_filter else lookback)
+    if n <= min_required:
+        return sig
+
+    blocks_needed = int(math.ceil(horizon / block_size))
+    offsets = np.arange(block_size)
+    for i in range(min_required, n):
+        if not math.isfinite(close_arr[i]) or close_arr[i] <= 0:
+            continue
+        if trend_filter:
+            if (
+                not math.isfinite(trend_ma[i])
+                or not math.isfinite(trend_slope[i])
+                or close_arr[i] <= trend_ma[i]
+                or trend_slope[i] < min_trend_slope_pct
+            ):
+                continue
+
+        hist = log_ret[i - lookback + 1 : i + 1]
+        hist = hist[np.isfinite(hist)]
+        if len(hist) < max(20, min(lookback // 2, lookback - 1)):
+            continue
+
+        rng = np.random.default_rng(seed + i * 1_000_003)
+        if block_size <= 1 or len(hist) <= block_size:
+            sampled = rng.choice(hist, size=(paths, horizon), replace=True)
+        else:
+            max_start = len(hist) - block_size
+            starts = rng.integers(0, max_start + 1, size=(paths, blocks_needed))
+            sampled = np.empty((paths, blocks_needed * block_size), dtype=float)
+            for block_idx in range(blocks_needed):
+                idx = starts[:, block_idx : block_idx + 1] + offsets
+                sampled[:, block_idx * block_size : (block_idx + 1) * block_size] = hist[idx]
+            sampled = sampled[:, :horizon]
+
+        cumulative = sampled.cumsum(axis=1)
+        final_pct = np.expm1(cumulative[:, -1]) * 100.0 - roundtrip_cost_pct
+        min_path_pct = np.expm1(cumulative.min(axis=1)) * 100.0
+
+        p_up = float(np.mean(final_pct > 0.0))
+        expected_pct = float(np.mean(final_pct))
+        stop_hit_prob = float(np.mean(min_path_pct <= -stop_loss_pct))
+        tail_cutoff = float(np.percentile(final_pct, 5))
+        tail = final_pct[final_pct <= tail_cutoff]
+        cvar_loss_pct = float(-np.mean(tail)) if tail.size else 0.0
+
+        if (
+            p_up >= min_p_up
+            and expected_pct >= min_expected_pct
+            and stop_hit_prob <= max_stop_hit_prob
+            and cvar_loss_pct <= max_cvar_loss_pct
+        ):
+            sig.iloc[i] = 1
+        elif not long_only and (1.0 - p_up) >= min_p_up and expected_pct <= -min_expected_pct:
+            # Kept for completeness; V1 records run long_only=true.
+            if stop_hit_prob <= max_stop_hit_prob and cvar_loss_pct <= max_cvar_loss_pct:
+                sig.iloc[i] = -1
+
+    if long_only:
+        sig = sig.clip(lower=0)
+    return sig
+
+
 def _signals_combo(df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
     specs = params.get("specs") or params.get("probe_specs") or []
     if not isinstance(specs, list) or not specs:
@@ -877,6 +986,8 @@ def _build_signals(engine: str, df: pd.DataFrame, params: dict[str, Any]) -> pd.
         return _signals_swing_pivot(high, low, close, params)
     if engine == "weekly_divergence":
         return _signals_weekly_divergence(high, low, close, params)
+    if engine == "path_simulator":
+        return _signals_path_simulator(df, params)
     if engine == "hybrid_breakout":
         return _signals_hybrid_breakout(df, params)
     if engine == "hull_suite":

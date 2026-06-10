@@ -107,6 +107,14 @@ PSEUDOCODE_BY_ENGINE = {
         "  emit directional signal on confirmed trend flip",
         "  execute signal at open[t+1]",
     ],
+    "path_simulator": [
+        "on bar t:",
+        "  returns = log returns from trailing lookback closed candles only",
+        "  bootstrap paths x horizon future paths using deterministic seed",
+        "  estimate probability up, expected net return, stop-hit probability and 5pct CVaR",
+        "  enter long only when all probability, expectancy and tail-risk gates pass",
+        "  execute signal at open[t+1]; never inspect candles after t",
+    ],
     "macd": [
         "on bar t:",
         "  closes = close[0:t]",

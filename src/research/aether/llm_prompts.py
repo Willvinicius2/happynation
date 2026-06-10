@@ -20,6 +20,9 @@ ALLOWED_ENGINES = {
     # trade. Janelas longas (50-200 bars), captura tendencias estruturais
     # que escapam do scalp/intraday dominante na arvore atual.
     "golden_cross", "swing_pivot", "weekly_divergence",
+    # Tier D-simulator: ideias externas viram simulacao probabilistica testavel,
+    # sem Polymarket, sem copy-trade e sem promessa HFT.
+    "path_simulator",
 }
 
 SYSTEM_PROMPT = """Voce e o Hypothesis Generator do Aether — pesquisador de alpha quantitativo em cripto.
@@ -93,6 +96,7 @@ Engines e params:
 - golden_cross(short_window,long_window,slope_window,slope_min,distance_min,long_only) — SWING: MA cross swing-grade (50/200 classico). long_window>=100 obrigatorio, exige slope da MA longa alinhado pra evitar catch-knife. Alvo: holds de semanas/meses.
 - swing_pivot(swing_lookback,trend_ma,pullback_tolerance,invalidation_buffer,long_only) — SWING: pullback a swing low em uptrend (oposto de structure_break, que rompe). Compra retorno ao suporte enquanto MA(100) confirma trend. Trades de dias-semanas.
 - weekly_divergence(rsi_period,lookback,min_gap,rsi_oversold,rsi_overbought,long_only) — SWING: divergencia RSI em janela larga (lookback>=40). Captura reversoes estruturais que esgotamento de scalp RSI nao pega. Alvo: viradas de tendencia em swing.
+- path_simulator(lookback,horizon,paths,block_size,min_p_up,min_expected_pct,max_stop_hit_prob,max_cvar_loss_pct,roundtrip_cost_pct,long_only) - SIMULATOR: bootstrap de caminhos futuros usando candles Binance fechados. Entra apenas quando probabilidade, expectativa e risco de cauda convergem; sem Polymarket, wallets ou HFT.
 
 PRIORIZE engines com BAIXA frequencia na arvore E os engines ESTRUTURAIS (regime_filter, vol_compression, structure_break) — eles abrem espaco causal novo onde indicadores classicos saturam. Varie mecanismo causal (momentum, mean revert, breakout, regime, volume, volatilidade, filtro de tendencia, fade contrarian, price-action estrutural).
 
@@ -245,5 +249,6 @@ def engine_catalog_for_engineer() -> str:
         "structure_break(swing_lookback,confirm_bars,long_only) | "
         "golden_cross(short_window,long_window>=100,slope_window,slope_min,distance_min,long_only) [SWING] | "
         "swing_pivot(swing_lookback,trend_ma,pullback_tolerance,invalidation_buffer,long_only) [SWING] | "
-        "weekly_divergence(rsi_period,lookback>=40,min_gap,rsi_oversold,rsi_overbought,long_only) [SWING]"
+        "weekly_divergence(rsi_period,lookback>=40,min_gap,rsi_oversold,rsi_overbought,long_only) [SWING] | "
+        "path_simulator(lookback,horizon,paths,block_size,min_p_up,min_expected_pct,max_stop_hit_prob,max_cvar_loss_pct,roundtrip_cost_pct,long_only) [SIM]"
     )

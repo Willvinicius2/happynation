@@ -252,6 +252,7 @@ from .compute_signals import (
     _signals_golden_cross,
     _signals_swing_pivot,
     _signals_weekly_divergence,
+    _signals_path_simulator,
     _signals_combo,
     _build_signals,
     _signals_sma_cross_exits,

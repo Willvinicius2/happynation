@@ -98,6 +98,11 @@ PNL_WEIGHT = _env_float("AETHER_DEPLOY_PNL_WEIGHT", 0.08)
 SHARPE_WEIGHT = _env_float("AETHER_DEPLOY_SHARPE_WEIGHT", 0.08)
 MDD_PENALTY = _env_float("AETHER_DEPLOY_MDD_PENALTY", 0.10)
 FAST_TF_BONUS = _env_float("AETHER_DEPLOY_FAST_TF_BONUS", 0.08)
+MIN_HIT_RATE = _env_float("AETHER_DEPLOY_MIN_HIT_RATE", 0.0)
+HIT_RATE_WEIGHT = _env_float("AETHER_DEPLOY_HIT_RATE_WEIGHT", 0.0)
+MAX_EST_TRADES_PER_DAY = _env_float("AETHER_DEPLOY_MAX_EST_TRADES_PER_DAY", 0.0)
+RESPECT_RANKING_RESET = _env_bool("AETHER_DEPLOY_RESPECT_RANKING_RESET", True)
+AETHER_DEPLOY_CAMPAIGN_ID = os.environ.get("AETHER_DEPLOY_CAMPAIGN_ID", "").strip()
 
 # Default risk se nao houver no node.
 # TP 10% deixa o trail decidir a saida na maioria dos casos: ele reage ao
@@ -184,18 +189,77 @@ def _block_reason(blocklist: dict, active_id: str, source_node_id: str) -> str:
     return ""
 
 
-def _validated_nodes(conn: sqlite3.Connection) -> list[tuple[sqlite3.Row, dict]]:
+def _active_campaign_id(conn: sqlite3.Connection) -> str | None:
+    if AETHER_DEPLOY_CAMPAIGN_ID:
+        return AETHER_DEPLOY_CAMPAIGN_ID
+    try:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM campaigns
+            WHERE kind='current' AND status='active'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    return str(row["id"]) if row and row["id"] else None
+
+
+def _ranking_reset_filter(conn: sqlite3.Connection, campaign_id: str | None) -> tuple[str | None, set[str]]:
+    if not RESPECT_RANKING_RESET or not campaign_id:
+        return None, set()
+    try:
+        row = conn.execute(
+            "SELECT value_json FROM settings WHERE key=?",
+            (f"ranking_hidden_node_ids:{campaign_id}",),
+        ).fetchone()
+    except sqlite3.Error:
+        return None, set()
+    if not row:
+        return None, set()
+    try:
+        payload = json.loads(row["value_json"] or "{}")
+    except json.JSONDecodeError:
+        return None, set()
+    if not isinstance(payload, dict):
+        return None, set()
+    hidden_ids = {str(node_id) for node_id in (payload.get("hidden_node_ids") or []) if node_id}
+    reset_at = str(payload.get("reset_at") or "") or None
+    return reset_at, hidden_ids
+
+
+def _validated_nodes(conn: sqlite3.Connection) -> tuple[list[tuple[sqlite3.Row, dict]], dict]:
+    campaign_id = _active_campaign_id(conn)
+    reset_at, hidden_ids = _ranking_reset_filter(conn, campaign_id)
+    params: list[object] = []
+    campaign_clause = ""
+    reset_clause = ""
+    if campaign_id:
+        campaign_clause = "AND campaign_id=?"
+        params.append(campaign_id)
+    if reset_at:
+        reset_clause = "AND created_at > ?"
+        params.append(reset_at)
     rows = conn.execute(
         """
-        SELECT id, name, score, metrics_json
+        SELECT id, name, score, metrics_json, created_at
         FROM nodes
         WHERE status='validated'
           AND id != 'root'
           AND id NOT LIKE 'tf:%'
-        """
+          {campaign_clause}
+          {reset_clause}
+        """.format(campaign_clause=campaign_clause, reset_clause=reset_clause),
+        params,
     ).fetchall()
     out: list[tuple[sqlite3.Row, dict]] = []
+    hidden_filtered = 0
     for row in rows:
+        if str(row["id"] or "") in hidden_ids:
+            hidden_filtered += 1
+            continue
         try:
             metrics = json.loads(row["metrics_json"] or "{}")
         except json.JSONDecodeError:
@@ -209,7 +273,12 @@ def _validated_nodes(conn: sqlite3.Connection) -> list[tuple[sqlite3.Row, dict]]
         }:
             continue
         out.append((row, metrics))
-    return out
+    return out, {
+        "campaign_id": campaign_id,
+        "reset_at": reset_at,
+        "hidden_ids": len(hidden_ids),
+        "hidden_filtered": hidden_filtered,
+    }
 
 
 def _pick_metric(metrics: dict, *keys: str):
@@ -255,6 +324,11 @@ def _deploy_gate_block_reason(metrics: dict, score: float) -> str:
         return "critic_rejected"
     if CRITIC_GATE == "approved" and critic_status != "approved":
         return "critic_not_approved"
+    min_hit_pct = _normalize_hit_rate(MIN_HIT_RATE)
+    if min_hit_pct > 0:
+        hit_pct = _normalize_hit_rate(_pick_metric(metrics, "hit_rate", "win_rate", "winrate"))
+        if hit_pct < min_hit_pct:
+            return "hit_rate_below_min"
     return ""
 
 
@@ -418,6 +492,13 @@ def _summary_float(rec: dict, key: str, default: float = 0.0) -> float:
     return _as_float(summary.get(key), default)
 
 
+def _normalize_hit_rate(value) -> float:
+    hit = _as_float(value, 0.0)
+    if hit <= 0:
+        return 0.0
+    return hit * 100.0 if hit <= 1.0 else hit
+
+
 def _timeframe_minutes(timeframe: str) -> int | None:
     tf = str(timeframe or "").strip().lower()
     table = {
@@ -435,6 +516,24 @@ def _timeframe_minutes(timeframe: str) -> int | None:
         "1d": 1440,
     }
     return table.get(tf)
+
+
+def _estimated_trades_per_day(rec: dict) -> float:
+    trades = _summary_float(rec, "trade_count")
+    if trades <= 0:
+        return 0.0
+    tf = str(rec.get("timeframe") or "").strip().lower()
+    # These divisors mirror the current Aether validation windows used by the
+    # frequency reports: short intraday candidates have a shorter available
+    # window than 1h/4h/1d candidates.
+    days_by_tf = {
+        "15m": 180.0,
+        "1h": 730.0,
+        "4h": 730.0,
+        "1d": 1095.0,
+    }
+    days = days_by_tf.get(tf, 730.0)
+    return trades / days if days > 0 else 0.0
 
 
 def _fast_timeframe_bonus(timeframe: str) -> float:
@@ -461,11 +560,13 @@ def _deploy_rank_score(base_score: float, rec: dict) -> float:
     pnl = _summary_float(rec, "pnl_pct")
     sharpe = _summary_float(rec, "sharpe")
     mdd = _summary_float(rec, "mdd_pct")
+    hit_pct = _normalize_hit_rate(_summary_float(rec, "hit_rate"))
     trade_bonus = min(max(trades, 0.0), 180.0) / 180.0 * TRADE_COUNT_WEIGHT
     pnl_bonus = min(max(pnl, 0.0), 200.0) / 200.0 * PNL_WEIGHT
     sharpe_bonus = min(max(sharpe, 0.0), 3.0) / 3.0 * SHARPE_WEIGHT
+    hit_bonus = min(max(hit_pct, 0.0), 100.0) / 100.0 * HIT_RATE_WEIGHT
     mdd_drag = min(max(mdd, 0.0), 50.0) / 50.0 * MDD_PENALTY
-    return base_score + trade_bonus + pnl_bonus + sharpe_bonus + _fast_timeframe_bonus(str(rec.get("timeframe") or "")) - mdd_drag
+    return base_score + trade_bonus + pnl_bonus + sharpe_bonus + hit_bonus + _fast_timeframe_bonus(str(rec.get("timeframe") or "")) - mdd_drag
 
 
 def _hypothesis_base_name(rec: dict) -> str:
@@ -535,6 +636,7 @@ def _select_deploy_records(
 ) -> list[tuple[float, dict]]:
     selected: list[tuple[float, dict]] = []
     family_counts, asset_counts, asset_family_tf_counts, hyp_asset_counts = _seed_cap_counts(reserved_records or [])
+    selected_est_tpd = sum(_estimated_trades_per_day(rec) for rec in (reserved_records or []))
     for idx, (score, rec) in enumerate(ranked):
         family = _family_for(rec)
         asset = _asset_for(rec)
@@ -565,7 +667,15 @@ def _select_deploy_records(
             if cap_details is not None:
                 cap_details[_cap_detail_key("hypothesis_asset", asset, hyp_key[0])] += 1
             continue
+        rec_est_tpd = _estimated_trades_per_day(rec)
+        if MAX_EST_TRADES_PER_DAY > 0 and rec_est_tpd > 0 and selected_est_tpd + rec_est_tpd > MAX_EST_TRADES_PER_DAY:
+            if cap_reasons is not None:
+                cap_reasons["estimated_trades_per_day_cap"] += 1
+            if cap_details is not None:
+                cap_details[_cap_detail_key("estimated_tpd", asset, str(rec.get("timeframe") or "?"))] += 1
+            continue
         selected.append((score, rec))
+        selected_est_tpd += rec_est_tpd
         family_counts[family] = family_counts.get(family, 0) + 1
         asset_counts[asset] = asset_counts.get(asset, 0) + 1
         asset_family_tf_counts[asset_family_tf] = asset_family_tf_counts.get(asset_family_tf, 0) + 1
@@ -582,7 +692,7 @@ def _select_deploy_records(
 def run_once(log: logging.Logger) -> dict:
     blocklist = _load_blocklist()
     with _connect() as conn:
-        nodes = _validated_nodes(conn)
+        nodes, reset_info = _validated_nodes(conn)
     candidates: list[tuple[float, dict]] = []
     gate_reasons: Counter[str] = Counter()
     record_reasons: Counter[str] = Counter()
@@ -679,6 +789,14 @@ def run_once(log: logging.Logger) -> dict:
         "cap_detail": _format_reason_counts(cap_details),
     }
     detail_msg = " ".join(f"{name}={value}" for name, value in details.items() if value)
+    if reset_info.get("reset_at"):
+        reset_msg = (
+            f"ranking_reset=campaign:{reset_info.get('campaign_id') or '-'},"
+            f"reset_at:{reset_info.get('reset_at')},"
+            f"hidden:{reset_info.get('hidden_ids')},"
+            f"filtered_hidden:{reset_info.get('hidden_filtered')}"
+        )
+        detail_msg = f"{detail_msg} {reset_msg}".strip()
     if detail_msg:
         log.info("deploy detail: %s", detail_msg)
     return {
@@ -691,6 +809,7 @@ def run_once(log: logging.Logger) -> dict:
         "blocklist_reasons": dict(blocklist_reasons),
         "cap_reasons": dict(cap_reasons),
         "cap_details": dict(cap_details),
+        "ranking_reset": reset_info,
     }
 
 
@@ -698,11 +817,14 @@ def main() -> int:
     log = _setup_logger()
     log.info(f"auto_deploy iniciado db={db_path()} poll={POLL_SECONDS}s")
     log.info(
-        "config: min_score=%s min_pnl=%s min_trades=%s max_mdd=%s top_n=%s assets=%s timeframes=%s max_family=%s max_asset=%s max_asset_family_tf=%s max_hyp_asset=%s managed_sources=%s respect_unmanaged_caps=%s",
+        "config: min_score=%s min_pnl=%s min_trades=%s max_mdd=%s min_hit=%s hit_weight=%s max_est_tpd=%s top_n=%s assets=%s timeframes=%s max_family=%s max_asset=%s max_asset_family_tf=%s max_hyp_asset=%s managed_sources=%s respect_unmanaged_caps=%s",
         MIN_SCORE,
         MIN_PNL_PCT,
         MIN_TRADES,
         "off" if MAX_MDD_PCT <= 0 else MAX_MDD_PCT,
+        "off" if MIN_HIT_RATE <= 0 else MIN_HIT_RATE,
+        HIT_RATE_WEIGHT,
+        "off" if MAX_EST_TRADES_PER_DAY <= 0 else MAX_EST_TRADES_PER_DAY,
         DEPLOY_TOP_N,
         ",".join(sorted(ALLOWED_ASSETS)) or "*",
         ",".join(sorted(ALLOWED_TIMEFRAMES)) or "*",
@@ -712,6 +834,11 @@ def main() -> int:
         MAX_PER_HYPOTHESIS_ASSET,
         ",".join(MANAGED_SOURCE_PATTERNS) or "(none)",
         RESPECT_UNMANAGED_CAPS,
+    )
+    log.info(
+        "ranking_reset_filter: respect=%s campaign=%s",
+        RESPECT_RANKING_RESET,
+        AETHER_DEPLOY_CAMPAIGN_ID or "active",
     )
     log.info("blocklist=%s", BLOCKLIST_PATH)
     while True:

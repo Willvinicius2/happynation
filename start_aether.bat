@@ -12,11 +12,13 @@ cd /d "%~dp0"
 REM Peneira 2026-05-19: menos variantes parecidas e gates de robustez mais altos.
 REM Mantem diversidade por ativo/familia e evita reativar estrategias bloqueadas
 REM em src\logs\research\strategy_blocklist.json.
-set "AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF=3"
-set "AETHER_DEPLOY_MAX_PER_ASSET=5"
+set "AETHER_DEPLOY_MAX_PER_ASSET_FAMILY_TF=7"
+set "AETHER_DEPLOY_MAX_PER_ASSET=10"
 set "AETHER_DEPLOY_MAX_PER_FAMILY=20"
 set "AETHER_DEPLOY_TOP_N=40"
-set "AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET=2"
+set "AETHER_DEPLOY_MAX_PER_HYPOTHESIS_ASSET=5"
+set "AETHER_DEPLOY_MAX_EST_TRADES_PER_DAY=5.0"
+set "AETHER_DEPLOY_RESPECT_RANKING_RESET=1"
 REM Sem cap de timeframe - 1H, 4H, 1D, todas entram (era so "1H" por default)
 set "AETHER_DEPLOY_ALLOWED_TIMEFRAMES=*"
 REM Allowlist alinhada com os 10 ativos do hub multi-TF (portfolio.yaml).
@@ -30,7 +32,7 @@ REM e excesso de variantes parecidas no bot.
 set "AETHER_DEPLOY_MIN_SCORE=0.50"
 set "AETHER_DEPLOY_MIN_TRADES=30"
 set "AETHER_DEPLOY_MIN_PNL_PCT=10.0"
-set "AETHER_DEPLOY_MAX_MDD_PCT=30.0"
+set "AETHER_DEPLOY_MAX_MDD_PCT=0"
 
 REM === Critic v4 INTERMEDIARIO ===
 REM Calibracao 2026-05-07: nivel intermediario entre o default original

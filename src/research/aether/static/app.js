@@ -1614,7 +1614,7 @@ async function refreshRanking() {
   renderRanking();
 }
 
-// Mapa mental: mostra somente agentes e o trabalho atual deles (vis-network).
+// Quadro operacional: mostra agentes e o trabalho atual deles sem zoom/canvas.
 let _agentsNetwork = null;
 let _agentsNetData = null;
 let _mindmapLoading = false;
@@ -1622,18 +1622,8 @@ let _mindmapLastFetch = 0;
 let _agentsGraphLast = null;
 let _agentsGraphSelectedId = null;
 let _agentsGraphPassingSelected = false;
+let _agentWorkItems = [];
 const MINDMAP_MIN_INTERVAL_MS = 6000;
-
-function _waitForVis(retries = 30) {
-  return new Promise((resolve, reject) => {
-    const tick = () => {
-      if (typeof window.vis !== "undefined" && window.vis.Network) return resolve();
-      if (--retries <= 0) return reject(new Error("vis-network nao carregou (CDN bloqueado?)"));
-      setTimeout(tick, 100);
-    };
-    tick();
-  });
-}
 
 function renderMindmapFocus(res) {
   const panel = $("agentsGraphFocus");
@@ -1913,6 +1903,237 @@ function renderAgentsGraphDetail(graphNode) {
   `;
 }
 
+function agentStatusLabel(status) {
+  const text = String(status || "standby");
+  if (text === "running") return "rodando";
+  if (text === "queued") return "fila";
+  if (text === "failed") return "falha";
+  if (text === "standby") return "standby";
+  return text;
+}
+
+function agentWorkPhase(agent, task) {
+  return task?.type || agent?.stats?.phase || agent?.current_task_id || "aguardando";
+}
+
+function agentWorkTarget(agent, task) {
+  if (task) return task.node_name || task.node_id || task.id || "-";
+  const event = (agent?.recent_events || [])[0];
+  return agent?.stats?.bubble || event?.message || agent?.current_task_id || "sem tarefa ativa";
+}
+
+function agentWorkMetricText(task) {
+  if (!task) return "-";
+  const metrics = task.metrics || {};
+  const parts = [
+    metrics.pnl_pct != null ? `PnL ${shortNumber(metrics.pnl_pct, 1, "%")}` : "",
+    metrics.sharpe != null ? `Sh ${shortNumber(metrics.sharpe, 2)}` : "",
+    metrics.trade_count != null ? `${metrics.trade_count} trades` : "",
+    metrics.mdd_pct != null ? `MDD ${shortNumber(metrics.mdd_pct, 1, "%")}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" / ") : "-";
+}
+
+function agentWorkProbeText(task) {
+  if (!task) return "-";
+  const engines = (task.engines || []).slice(0, 3).join(", ");
+  const probes = Number(task.probes_count || 0);
+  return [probes ? `${probes} probes` : "", engines].filter(Boolean).join(" / ") || "-";
+}
+
+function buildAgentWorkItems(res) {
+  const agentNodes = (res?.nodes || [])
+    .filter((node) => String(node.id || "").startsWith("agent::") && node.detail)
+    .map((node) => ({ graphId: node.id, ...node.detail }));
+  const order = { running: 0, queued: 1, failed: 2, standby: 3 };
+  const items = [];
+
+  for (const agent of agentNodes) {
+    const tasks = Array.isArray(agent.tasks) ? agent.tasks : [];
+    if (tasks.length) {
+      for (const task of tasks.slice(0, 4)) {
+        items.push({
+          kind: "task",
+          graphId: `work::${task.id || agent.current_task_id || agent.role}`,
+          agent,
+          task,
+          status: task.status || agent.status || "standby",
+          rawNodeId: task.node_id || "",
+        });
+      }
+      continue;
+    }
+    items.push({
+      kind: "agent",
+      graphId: agent.graphId,
+      agent,
+      task: null,
+      status: agent.status || "standby",
+      rawNodeId: "",
+    });
+  }
+
+  return items.sort((a, b) => {
+    const statusOrder = (order[a.status] ?? 4) - (order[b.status] ?? 4);
+    if (statusOrder) return statusOrder;
+    const aTime = String(a.task?.updated_at || a.agent?.updated_at || "");
+    const bTime = String(b.task?.updated_at || b.agent?.updated_at || "");
+    return bTime.localeCompare(aTime);
+  });
+}
+
+function renderAgentWorkInlineDetail(item) {
+  const panel = $("agentWorkInlineDetail");
+  if (!panel) return;
+  if (!item) {
+    panel.innerHTML = `
+      <div class="agentWorkDetailHead">
+        <span>Detalhe</span>
+        <strong>selecione uma linha</strong>
+      </div>
+      <p>Escolha um agente ou tarefa para ver o alvo, probes e metricas atuais.</p>
+    `;
+    return;
+  }
+
+  const agent = item.agent || {};
+  const task = item.task;
+  const status = agentStatusLabel(item.status);
+  panel.innerHTML = `
+    <div class="agentWorkDetailHead">
+      <span>${escapeHtml(agent.label || agent.role || "Agente")}</span>
+      <strong>${escapeHtml(status)}</strong>
+    </div>
+    <div class="agentWorkDetailGrid">
+      ${detailMetric("fase", agentWorkPhase(agent, task))}
+      ${detailMetric("timeframe", task?.timeframe || agent.timeframe || "-")}
+      ${detailMetric("probes", task?.probes_count || 0)}
+      ${detailMetric("atualizado", task?.updated_at || agent.updated_at || "-")}
+    </div>
+    <div class="agentWorkDetailBlock">
+      <span>Alvo</span>
+      <strong>${escapeHtml(shortText(agentWorkTarget(agent, task), 120))}</strong>
+      ${task?.node_id ? `<small>${escapeHtml(task.node_id)}</small>` : ""}
+    </div>
+    ${task ? renderTaskDetail(task) : `
+      <div class="agentWorkDetailBlock">
+        <span>Ultima acao</span>
+        ${(agent.recent_events || []).slice(0, 3).map((event) => `
+          <small>${escapeHtml([event.ts, event.type, shortText(event.message || "", 120)].filter(Boolean).join(" / "))}</small>
+        `).join("") || `<small>${escapeHtml(agent.stats?.bubble || "Sem evento recente.")}</small>`}
+      </div>
+    `}
+  `;
+}
+
+function renderAgentWorkBoard(res) {
+  const container = $("agentsGraphContainer");
+  if (!container) return;
+
+  const stats = res?.stats || {};
+  _agentWorkItems = buildAgentWorkItems(res);
+  const activeItems = _agentWorkItems.filter((item) => item.status === "running" || item.status === "queued" || item.kind === "task");
+  const visibleItems = (activeItems.length ? activeItems : _agentWorkItems).slice(0, 24);
+  const standbyAgents = _agentWorkItems
+    .filter((item) => item.kind === "agent" && item.status === "standby")
+    .slice(0, 18);
+
+  container.innerHTML = `
+    <section class="agentWorkBoard" aria-label="Trabalho dos agentes Aether">
+      <header class="agentWorkHeader">
+        <div>
+          <span>Trabalho dos agentes</span>
+          <h3>${escapeHtml(stats.running_agents || 0)} rodando / ${escapeHtml(stats.running_tasks || 0)} tarefas</h3>
+          <p>${escapeHtml(stats.queued_tasks || 0)} na fila / ${escapeHtml(stats.passing_strategies || 0)} estrategias passando / ${escapeHtml(stats.work_items || 0)} itens recentes</p>
+        </div>
+        <div class="agentWorkHeaderPills">
+          <b>${escapeHtml(stats.agents || 0)} agentes</b>
+          <b>${escapeHtml(stats.deployed_passing || 0)} deploy</b>
+          <b>${escapeHtml(stats.blocked_passing || 0)} bloqueadas</b>
+        </div>
+      </header>
+
+      <div class="agentWorkContent">
+        <div class="agentWorkTableWrap">
+          <table class="agentWorkTable">
+            <thead>
+              <tr>
+                <th>Agente</th>
+                <th>Status</th>
+                <th>Trabalho</th>
+                <th>Alvo</th>
+                <th>Probes / engine</th>
+                <th>Resultado</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${visibleItems.map((item, index) => {
+                const agent = item.agent || {};
+                const task = item.task;
+                return `
+                  <tr class="${escapeHtml(item.status || "standby")}" data-work-index="${index}" data-node="${escapeHtml(item.rawNodeId || "")}">
+                    <td>
+                      <strong>${escapeHtml(agent.label || agent.role || "Agente")}</strong>
+                      <small>${escapeHtml([agent.role, task?.timeframe || agent.timeframe].filter(Boolean).join(" / "))}</small>
+                    </td>
+                    <td><span class="agentWorkStatus">${escapeHtml(agentStatusLabel(item.status))}</span></td>
+                    <td>
+                      <strong>${escapeHtml(shortText(agentWorkPhase(agent, task), 34))}</strong>
+                      <small>${escapeHtml(shortText(agent.stats?.bubble || item.task?.summary || "", 76))}</small>
+                    </td>
+                    <td>
+                      <strong>${escapeHtml(shortText(agentWorkTarget(agent, task), 58))}</strong>
+                      <small>${escapeHtml(task?.node_status || item.kind)}</small>
+                    </td>
+                    <td>${escapeHtml(agentWorkProbeText(task))}</td>
+                    <td>${escapeHtml(agentWorkMetricText(task))}</td>
+                  </tr>
+                `;
+              }).join("") || `
+                <tr class="standby">
+                  <td colspan="6">Nenhum trabalho ativo no snapshot atual.</td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+        <aside id="agentWorkInlineDetail" class="agentWorkInlineDetail"></aside>
+      </div>
+
+      <section class="agentStandbyStrip" aria-label="Agentes em espera">
+        <span>Em espera</span>
+        <div>
+          ${standbyAgents.map((item) => `
+            <button type="button" data-work-index="${_agentWorkItems.indexOf(item)}">
+              ${escapeHtml(item.agent?.label || item.agent?.role || "Agente")}
+            </button>
+          `).join("") || `<small>sem agentes em standby</small>`}
+        </div>
+      </section>
+    </section>
+  `;
+
+  const rows = container.querySelectorAll("[data-work-index]");
+  for (const row of rows) {
+    row.addEventListener("click", () => {
+      const index = Number(row.dataset.workIndex);
+      const item = _agentWorkItems[index];
+      if (!item) return;
+      for (const candidate of container.querySelectorAll("[data-work-index]")) candidate.classList.remove("selected");
+      row.classList.add("selected");
+      renderAgentWorkInlineDetail(item);
+      if (item.rawNodeId && state.data) {
+        state.selected = item.rawNodeId;
+        const node = state.data.nodes.find((candidate) => candidate.id === item.rawNodeId);
+        if (node) renderDetails(node);
+      }
+    });
+  }
+  renderAgentWorkInlineDetail(visibleItems[0] || _agentWorkItems[0] || null);
+  const firstRow = container.querySelector("[data-work-index]");
+  if (firstRow) firstRow.classList.add("selected");
+}
+
 const STRATEGIC_AGENT_ROLES = new Set([
   "chief_orchestrator",
   "hypothesis_generator",
@@ -2138,20 +2359,23 @@ function selectPassingStrategies() {
 async function refreshMindmap(force = false) {
   if (_mindmapLoading) return;
   const now = Date.now();
-  if (!force && _agentsNetwork && (now - _mindmapLastFetch) < MINDMAP_MIN_INTERVAL_MS) return;
+  if (!force && (now - _mindmapLastFetch) < MINDMAP_MIN_INTERVAL_MS) return;
   _mindmapLoading = true;
   _mindmapLastFetch = now;
   const container = $("agentsGraphContainer");
   if (!container) { _mindmapLoading = false; return; }
-  // Spinner enquanto carrega CDN/dados
-  if (!_agentsNetwork) {
-    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-family:system-ui;font-size:13px;">carregando mapa de agentes...</div>`;
+  if (!_agentsGraphLast) {
+    container.innerHTML = `<div class="agentWorkLoading">carregando trabalho dos agentes...</div>`;
   }
   try {
-    await _waitForVis();
     const rawRes = await api("/api/agents_graph?limit_per_agent=4");
-    const res = simplifyAgentsGraph(rawRes);
+    const res = rawRes;
     _agentsGraphLast = res;
+    if (_agentsNetwork) {
+      _agentsNetwork.destroy();
+      _agentsNetwork = null;
+      _agentsNetData = null;
+    }
     const stats = $("agentsGraphStats");
     const graphStats = res.stats || {};
     if ($("agentMapAgents")) $("agentMapAgents").textContent = graphStats.agents || 0;
@@ -2169,98 +2393,14 @@ async function refreshMindmap(force = false) {
         `${graphStats.running_tasks || 0} tarefas`,
         `${graphStats.queued_tasks || 0} na fila`,
         `${graphStats.passing_strategies || 0} passando`,
-        `${graphStats.visual_nodes || graphStats.nodes || 0} blocos no mapa`,
+        `${graphStats.work_items || 0} itens de trabalho`,
       ].join(" / ");
     }
     renderMindmapFocus(res);
-    if (!_agentsGraphSelectedId) {
-      const generated = (res.nodes || []).find((node) => String(node.id || "").startsWith("stage::generated::"));
-      _agentsGraphSelectedId = graphStats.selected_graph_id || generated?.id || ((res.focus || [])[0] || {}).graph_node_id || null;
-    }
-
-    if (_agentsNetwork && _agentsNetData) {
-      updateAgentsGraphData(res);
-      if (_agentsGraphSelectedId) {
-        const selected = _agentsNetData.nodes.get(_agentsGraphSelectedId) || (res.nodes || []).find((node) => node.id === _agentsGraphSelectedId);
-        renderAgentsGraphDetail(selected);
-      } else {
-        renderAgentsGraphDetail(null);
-      }
-      _mindmapLoading = false;
-      return;
-    }
-
-    container.innerHTML = "";  // limpa spinner
-    _agentsNetData = {
-      nodes: new vis.DataSet(res.nodes || []),
-      edges: new vis.DataSet(res.edges || []),
-    };
-    const options = {
-      autoResize: true,
-      // Stabilizacao curta (60 iter) + fit auto. Depois desliga fisica pra
-      // performance (nao fica recalculando a cada refresh).
-      physics: {
-        enabled: true,
-        solver: "forceAtlas2Based",
-        forceAtlas2Based: {
-          gravitationalConstant: -70,
-          centralGravity: 0.018,
-          springLength: 175,
-          springConstant: 0.045,
-          damping: 0.74,
-          avoidOverlap: 0.85,
-        },
-        stabilization: { enabled: true, iterations: 75, updateInterval: 25, fit: true },
-        timestep: 0.45,
-      },
-      interaction: { hover: true, tooltipDelay: 120, dragNodes: true, zoomView: true, dragView: true, navigationButtons: false, multiselect: false },
-      nodes: {
-        borderWidth: 2,
-        margin: { top: 11, right: 14, bottom: 11, left: 14 },
-        shapeProperties: { borderRadius: 16 },
-        font: { face: "Inter, system-ui, Segoe UI, sans-serif", color: "#e0f2fe", multi: true },
-        shadow: { enabled: true, color: "rgba(34,211,238,0.18)", size: 18, x: 0, y: 6 },
-      },
-      edges: {
-        smooth: { enabled: true, type: "cubicBezier", forceDirection: "horizontal", roundness: 0.45 },
-        arrows: { to: { enabled: true, scaleFactor: 0.55, type: "arrow" } },
-        color: { color: "#38bdf8", opacity: 0.45 },
-        width: 2,
-        shadow: { enabled: true, color: "rgba(34,211,238,.28)", size: 8, x: 0, y: 0 },
-      },
-      layout: { improvedLayout: true },
-    };
-    _agentsNetwork = new vis.Network(container, _agentsNetData, options);
-    _agentsNetwork.once("stabilizationIterationsDone", () => {
-      // Desliga fisica apos estabilizar (zero recompute em hover/refresh)
-      _agentsNetwork.setOptions({ physics: { enabled: false } });
-      _agentsNetwork.fit({ animation: { duration: 400, easingFunction: "easeOutCubic" } });
-    });
-    _agentsNetwork.on("click", (params) => {
-      if (params.nodes && params.nodes.length) {
-        _agentsGraphPassingSelected = false;
-        const nid = params.nodes[0];
-        const selected = _agentsNetData.nodes.get(nid);
-        _agentsGraphSelectedId = nid;
-        renderAgentsGraphDetail(selected);
-        if (selected && selected.rawNodeId && state.data) {
-          state.selected = selected.rawNodeId;
-          const n = state.data.nodes.find((node) => node.id === selected.rawNodeId);
-          if (n) renderDetails(n);
-        }
-        const fixed = selected?.fixed === true;
-        _agentsNetData.nodes.update({ id: nid, fixed: !fixed });
-        updatePassingSelector(_agentsGraphLast);
-      }
-    });
-    if (_agentsGraphSelectedId) {
-      renderAgentsGraphDetail(_agentsNetData.nodes.get(_agentsGraphSelectedId));
-    } else {
-      renderAgentsGraphDetail(null);
-    }
+    renderAgentWorkBoard(res);
   } catch (e) {
-    console.error("Erro ao carregar mapa de agentes:", e);
-    container.innerHTML = `<div style="padding:20px;color:#ef4444;font-family:system-ui;">Erro ao gerar mapa: ${escapeHtml(e.message)}</div>`;
+    console.error("Erro ao carregar trabalho dos agentes:", e);
+    container.innerHTML = `<div class="agentWorkLoading error">Erro ao carregar trabalho dos agentes: ${escapeHtml(e.message)}</div>`;
   } finally {
     _mindmapLoading = false;
   }

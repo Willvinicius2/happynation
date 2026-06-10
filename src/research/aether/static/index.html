@@ -4,9 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aether / RAIO</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260604-forge-board-3">
+  <link rel="stylesheet" href="/static/styles.css?v=20260604-agent-work-board">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 </head>
 <body>
   <div class="app">
@@ -332,8 +331,8 @@
         <div class="agentMapHero" aria-label="Mapa interativo do Aether">
           <div>
             <div class="agentMapEyebrow">Aether cockpit vivo</div>
-            <h2>Mapa estrategico dos agentes</h2>
-            <p>Fluxo enxuto: pipeline da melhor estrategia, passantes, agentes-chave, trabalho vivo e acoes recentes.</p>
+            <h2>Trabalho dos agentes</h2>
+            <p>Quadro direto com agente, tarefa, alvo, probes e resultado atual.</p>
           </div>
           <div class="agentMapStats">
             <div><span>Agentes</span><strong id="agentMapAgents">--</strong></div>
@@ -362,7 +361,7 @@
           <div id="agentsGraphDetail" class="graphDetail"></div>
         </div>
         <div class="graphHud">
-          <span id="agentsGraphStats">--</span> / arraste para mover / scroll para zoom / clique nos blocos para detalhes
+          <span id="agentsGraphStats">--</span>
         </div>
       </section>
     </main>
@@ -418,6 +417,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=20260604-forge-board-3"></script>
+  <script src="/static/app.js?v=20260604-agent-work-board"></script>
 </body>
 </html>

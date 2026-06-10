@@ -49,7 +49,9 @@ def _env_int(name: str, default: int) -> int:
 
 
 RISK_GUARD_ENABLED = _env_bool("RISK_GUARD_ENABLED", True)
+DAILY_LOSS_GUARD_ENABLED = _env_bool("PAPER_DAILY_LOSS_GUARD_ENABLED", True)
 MAX_DAILY_LOSS_PCT = _env_float("MAX_DAILY_LOSS_PCT", 1.25)
+ASSET_DRAWDOWN_GUARD_ENABLED = _env_bool("PAPER_ASSET_DRAWDOWN_GUARD_ENABLED", True)
 MAX_ASSET_DRAWDOWN_PCT = _env_float("MAX_ASSET_DRAWDOWN_PCT", 3.0)
 MAX_GLOBAL_DRAWDOWN_PCT = _env_float("MAX_GLOBAL_DRAWDOWN_PCT", 5.0)
 MAX_OPEN_POSITIONS = _env_int("MAX_OPEN_POSITIONS", 3)
@@ -61,14 +63,17 @@ def reload_config_from_env() -> dict:
     Use isso depois de editar o .env e quiser que mudancas tomem efeito.
     Retorna dict com valores efetivos.
     """
-    global RISK_GUARD_ENABLED, MAX_DAILY_LOSS_PCT, MAX_ASSET_DRAWDOWN_PCT
+    global RISK_GUARD_ENABLED, DAILY_LOSS_GUARD_ENABLED, MAX_DAILY_LOSS_PCT
+    global ASSET_DRAWDOWN_GUARD_ENABLED, MAX_ASSET_DRAWDOWN_PCT
     global MAX_GLOBAL_DRAWDOWN_PCT, MAX_OPEN_POSITIONS, MAX_CONSECUTIVE_LOSSES
     global ROUNDTRIP_FEE_PCT, SLIPPAGE_PCT, MAX_POSITION_USD, MIN_POSITION_USD
     global AUTO_JUDGE_ENABLED, JUDGE_MIN_TRADES, JUDGE_MAX_LOSS_STREAK
     global JUDGE_MIN_WINRATE_PCT, JUDGE_MAX_DRAWDOWN_USD
     load_dotenv(override=True)
     RISK_GUARD_ENABLED = _env_bool("RISK_GUARD_ENABLED", True)
+    DAILY_LOSS_GUARD_ENABLED = _env_bool("PAPER_DAILY_LOSS_GUARD_ENABLED", True)
     MAX_DAILY_LOSS_PCT = _env_float("MAX_DAILY_LOSS_PCT", 1.25)
+    ASSET_DRAWDOWN_GUARD_ENABLED = _env_bool("PAPER_ASSET_DRAWDOWN_GUARD_ENABLED", True)
     MAX_ASSET_DRAWDOWN_PCT = _env_float("MAX_ASSET_DRAWDOWN_PCT", 3.0)
     MAX_GLOBAL_DRAWDOWN_PCT = _env_float("MAX_GLOBAL_DRAWDOWN_PCT", 5.0)
     MAX_OPEN_POSITIONS = _env_int("MAX_OPEN_POSITIONS", 3)
@@ -84,7 +89,9 @@ def reload_config_from_env() -> dict:
     JUDGE_MAX_DRAWDOWN_USD = _env_float("PAPER_JUDGE_MAX_DRAWDOWN_USD", 15.0)
     return {
         "RISK_GUARD_ENABLED": RISK_GUARD_ENABLED,
+        "PAPER_DAILY_LOSS_GUARD_ENABLED": DAILY_LOSS_GUARD_ENABLED,
         "MAX_DAILY_LOSS_PCT": MAX_DAILY_LOSS_PCT,
+        "PAPER_ASSET_DRAWDOWN_GUARD_ENABLED": ASSET_DRAWDOWN_GUARD_ENABLED,
         "MAX_ASSET_DRAWDOWN_PCT": MAX_ASSET_DRAWDOWN_PCT,
         "MAX_GLOBAL_DRAWDOWN_PCT": MAX_GLOBAL_DRAWDOWN_PCT,
         "MAX_OPEN_POSITIONS": MAX_OPEN_POSITIONS,
@@ -656,6 +663,16 @@ def _ensure_risk_state(asset_state):
     return risk
 
 
+def _portfolio_daily_realized_pnl(state: dict) -> float:
+    today = datetime.now().date().isoformat()
+    total = 0.0
+    for _, asset_state in _iter_assets(state):
+        risk = asset_state.get("risk") or {}
+        if risk.get("day") == today:
+            total += float(risk.get("daily_realized_pnl") or 0.0)
+    return total
+
+
 _TRADE_CSV_COLS = [
     "timestamp", "asset", "strategy", "side",
     "price", "qty", "pnl_usd", "pnl_pct", "balance_after",
@@ -1036,14 +1053,19 @@ def get_risk_snapshot(asset: str, strategy: str = "-") -> dict:
         meta = _ensure_meta_state(state)
         balance = float(meta.get("equity", TOTAL_BANKROLL))
         initial = float(meta.get("total_bankroll", TOTAL_BANKROLL))
-        day_start = float(risk.get("day_start_balance") or initial)
-        daily_pnl_pct = ((balance - day_start) / day_start * 100) if day_start else 0.0
+        daily_realized_pnl = _portfolio_daily_realized_pnl(state)
+        daily_pnl_pct = (daily_realized_pnl / initial * 100) if initial else 0.0
         drawdown_pct = ((initial - balance) / initial * 100) if initial else 0.0
         return {
             "asset": asset,
             "balance": balance,
+            "daily_realized_pnl_usd": daily_realized_pnl,
             "daily_pnl_pct": daily_pnl_pct,
+            "daily_loss_guard_enabled": DAILY_LOSS_GUARD_ENABLED,
+            "max_daily_loss_pct": MAX_DAILY_LOSS_PCT,
             "drawdown_pct": max(drawdown_pct, 0.0),
+            "asset_drawdown_guard_enabled": ASSET_DRAWDOWN_GUARD_ENABLED,
+            "max_asset_drawdown_pct": MAX_ASSET_DRAWDOWN_PCT,
             "consecutive_losses": int(risk.get("consecutive_losses", 0)),
             "position_open": s.get("position") is not None,
             "last_block_reason": risk.get("last_block_reason", ""),
@@ -1073,8 +1095,8 @@ def can_open_new_position(asset: str, strategy: str = "-") -> tuple[bool, str]:
         meta = _ensure_meta_state(state)
         balance = float(meta.get("equity", TOTAL_BANKROLL))
         initial = float(meta.get("total_bankroll", TOTAL_BANKROLL))
-        day_start = float(risk.get("day_start_balance") or initial)
-        daily_pnl_pct = ((balance - day_start) / day_start * 100) if day_start else 0.0
+        daily_realized_pnl = _portfolio_daily_realized_pnl(state)
+        daily_pnl_pct = (daily_realized_pnl / initial * 100) if initial else 0.0
         drawdown_pct = ((initial - balance) / initial * 100) if initial else 0.0
         loss_seq = int(risk.get("consecutive_losses", 0))
 
@@ -1089,9 +1111,9 @@ def can_open_new_position(asset: str, strategy: str = "-") -> tuple[bool, str]:
             reason = f"CIRCUIT BREAKER: drawdown global {global_dd_pct:.2f}% >= {MAX_GLOBAL_DRAWDOWN_PCT:.2f}%"
         elif open_positions >= MAX_OPEN_POSITIONS:
             reason = f"posicoes abertas {open_positions} >= MAX_OPEN_POSITIONS {MAX_OPEN_POSITIONS}"
-        elif daily_pnl_pct <= -MAX_DAILY_LOSS_PCT:
+        elif DAILY_LOSS_GUARD_ENABLED and daily_pnl_pct <= -MAX_DAILY_LOSS_PCT:
             reason = f"perda diaria {daily_pnl_pct:.2f}% <= -{MAX_DAILY_LOSS_PCT:.2f}%"
-        elif drawdown_pct >= MAX_ASSET_DRAWDOWN_PCT:
+        elif ASSET_DRAWDOWN_GUARD_ENABLED and drawdown_pct >= MAX_ASSET_DRAWDOWN_PCT:
             # Nota: hoje calcula DD em cima de equity global (meta.equity /
             # total_bankroll). Apesar do nome MAX_ASSET_DRAWDOWN_PCT, e
             # equivalente ao MAX_GLOBAL_DRAWDOWN_PCT. Mantido por compat.

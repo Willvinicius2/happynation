@@ -52,6 +52,188 @@ def test_risk_guard_resets_loss_streak_after_win(tmp_path, monkeypatch):
     assert reason == ""
 
 
+def test_daily_loss_uses_realized_today_not_total_drawdown(tmp_path, monkeypatch):
+    import src.modules.PaperBalanceLogger as paper
+
+    state_json = tmp_path / "state.json"
+    monkeypatch.setattr(paper, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(paper, "TRADES_CSV", tmp_path / "trades.csv")
+    monkeypatch.setattr(paper, "STATE_JSON", state_json)
+    monkeypatch.setattr(paper, "SUMMARY_TXT", tmp_path / "summary.txt")
+    monkeypatch.setattr(paper, "RISK_GUARD_ENABLED", True)
+    monkeypatch.setattr(paper, "DAILY_LOSS_GUARD_ENABLED", True)
+    monkeypatch.setattr(paper, "MAX_DAILY_LOSS_PCT", 3.0)
+    monkeypatch.setattr(paper, "MAX_ASSET_DRAWDOWN_PCT", 99.0)
+    monkeypatch.setattr(paper, "MAX_GLOBAL_DRAWDOWN_PCT", 99.0)
+    monkeypatch.setattr(paper, "MAX_OPEN_POSITIONS", 99)
+    monkeypatch.setattr(paper, "MAX_CONSECUTIVE_LOSSES", 99)
+
+    today = paper.datetime.now().date().isoformat()
+    state_json.write_text(json.dumps({
+        "_meta": {
+            "total_bankroll": 1000.0,
+            "cash_balance": 956.27,
+            "equity": 956.27,
+        },
+        "ADAUSDT": {
+            "strategy": "MultiStrategy",
+            "position": None,
+            "total_pnl_usd": 0.0,
+            "risk": {
+                "day": today,
+                "day_start_balance": 0.0,
+                "daily_realized_pnl": 0.0,
+                "consecutive_losses": 0,
+            },
+        },
+    }), encoding="utf-8")
+
+    snapshot = paper.get_risk_snapshot("ADAUSDT", "MultiStrategy")
+    assert snapshot["daily_realized_pnl_usd"] == 0.0
+    assert snapshot["daily_pnl_pct"] == 0.0
+    assert snapshot["drawdown_pct"] == pytest.approx(4.373)
+
+    allowed, reason = paper.can_open_new_position("ADAUSDT", "MultiStrategy")
+    assert allowed is True
+    assert reason == ""
+
+
+def test_daily_loss_guard_blocks_when_enabled(tmp_path, monkeypatch):
+    import src.modules.PaperBalanceLogger as paper
+
+    state_json = tmp_path / "state.json"
+    monkeypatch.setattr(paper, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(paper, "TRADES_CSV", tmp_path / "trades.csv")
+    monkeypatch.setattr(paper, "STATE_JSON", state_json)
+    monkeypatch.setattr(paper, "SUMMARY_TXT", tmp_path / "summary.txt")
+    monkeypatch.setattr(paper, "RISK_GUARD_ENABLED", True)
+    monkeypatch.setattr(paper, "DAILY_LOSS_GUARD_ENABLED", True)
+    monkeypatch.setattr(paper, "MAX_DAILY_LOSS_PCT", 3.0)
+    monkeypatch.setattr(paper, "MAX_ASSET_DRAWDOWN_PCT", 99.0)
+    monkeypatch.setattr(paper, "MAX_GLOBAL_DRAWDOWN_PCT", 99.0)
+    monkeypatch.setattr(paper, "MAX_OPEN_POSITIONS", 99)
+    monkeypatch.setattr(paper, "MAX_CONSECUTIVE_LOSSES", 99)
+
+    today = paper.datetime.now().date().isoformat()
+    state_json.write_text(json.dumps({
+        "_meta": {
+            "total_bankroll": 1000.0,
+            "cash_balance": 960.0,
+            "equity": 960.0,
+        },
+        "BNBUSDT": {
+            "strategy": "MultiStrategy",
+            "position": None,
+            "total_pnl_usd": -40.0,
+            "risk": {
+                "day": today,
+                "day_start_balance": 1000.0,
+                "daily_realized_pnl": -40.0,
+                "consecutive_losses": 0,
+            },
+        },
+    }), encoding="utf-8")
+
+    allowed, reason = paper.can_open_new_position("BNBUSDT", "MultiStrategy")
+    assert allowed is False
+    assert "perda diaria -4.00%" in reason
+
+
+def test_daily_loss_guard_can_be_disabled_for_analysis(tmp_path, monkeypatch):
+    import src.modules.PaperBalanceLogger as paper
+
+    state_json = tmp_path / "state.json"
+    monkeypatch.setattr(paper, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(paper, "TRADES_CSV", tmp_path / "trades.csv")
+    monkeypatch.setattr(paper, "STATE_JSON", state_json)
+    monkeypatch.setattr(paper, "SUMMARY_TXT", tmp_path / "summary.txt")
+    monkeypatch.setattr(paper, "RISK_GUARD_ENABLED", True)
+    monkeypatch.setattr(paper, "DAILY_LOSS_GUARD_ENABLED", False)
+    monkeypatch.setattr(paper, "MAX_DAILY_LOSS_PCT", 3.0)
+    monkeypatch.setattr(paper, "MAX_ASSET_DRAWDOWN_PCT", 99.0)
+    monkeypatch.setattr(paper, "MAX_GLOBAL_DRAWDOWN_PCT", 99.0)
+    monkeypatch.setattr(paper, "MAX_OPEN_POSITIONS", 99)
+    monkeypatch.setattr(paper, "MAX_CONSECUTIVE_LOSSES", 99)
+
+    today = paper.datetime.now().date().isoformat()
+    state_json.write_text(json.dumps({
+        "_meta": {
+            "total_bankroll": 1000.0,
+            "cash_balance": 960.0,
+            "equity": 960.0,
+        },
+        "BNBUSDT": {
+            "strategy": "MultiStrategy",
+            "position": None,
+            "total_pnl_usd": -40.0,
+            "risk": {
+                "day": today,
+                "day_start_balance": 1000.0,
+                "daily_realized_pnl": -40.0,
+                "consecutive_losses": 0,
+            },
+        },
+    }), encoding="utf-8")
+
+    snapshot = paper.get_risk_snapshot("BNBUSDT", "MultiStrategy")
+    assert snapshot["daily_loss_guard_enabled"] is False
+    assert snapshot["daily_pnl_pct"] == pytest.approx(-4.0)
+
+    allowed, reason = paper.can_open_new_position("BNBUSDT", "MultiStrategy")
+    assert allowed is True
+    assert reason == ""
+
+
+def test_asset_drawdown_guard_can_be_disabled_without_disabling_global_circuit(tmp_path, monkeypatch):
+    import src.modules.PaperBalanceLogger as paper
+
+    state_json = tmp_path / "state.json"
+    monkeypatch.setattr(paper, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(paper, "TRADES_CSV", tmp_path / "trades.csv")
+    monkeypatch.setattr(paper, "STATE_JSON", state_json)
+    monkeypatch.setattr(paper, "SUMMARY_TXT", tmp_path / "summary.txt")
+    monkeypatch.setattr(paper, "RISK_GUARD_ENABLED", True)
+    monkeypatch.setattr(paper, "DAILY_LOSS_GUARD_ENABLED", False)
+    monkeypatch.setattr(paper, "ASSET_DRAWDOWN_GUARD_ENABLED", False)
+    monkeypatch.setattr(paper, "MAX_ASSET_DRAWDOWN_PCT", 4.0)
+    monkeypatch.setattr(paper, "MAX_GLOBAL_DRAWDOWN_PCT", 5.0)
+    monkeypatch.setattr(paper, "MAX_OPEN_POSITIONS", 99)
+    monkeypatch.setattr(paper, "MAX_CONSECUTIVE_LOSSES", 99)
+
+    today = paper.datetime.now().date().isoformat()
+    state_json.write_text(json.dumps({
+        "_meta": {
+            "total_bankroll": 1000.0,
+            "cash_balance": 956.27,
+            "equity": 956.27,
+        },
+        "DOGEUSDT": {
+            "strategy": "MultiStrategy",
+            "position": None,
+            "total_pnl_usd": -43.73,
+            "risk": {
+                "day": today,
+                "day_start_balance": 0.0,
+                "daily_realized_pnl": 0.0,
+                "consecutive_losses": 0,
+            },
+        },
+    }), encoding="utf-8")
+
+    snapshot = paper.get_risk_snapshot("DOGEUSDT", "MultiStrategy")
+    assert snapshot["asset_drawdown_guard_enabled"] is False
+    assert snapshot["drawdown_pct"] == pytest.approx(4.373)
+
+    allowed, reason = paper.can_open_new_position("DOGEUSDT", "MultiStrategy")
+    assert allowed is True
+    assert reason == ""
+
+    monkeypatch.setattr(paper, "MAX_GLOBAL_DRAWDOWN_PCT", 4.0)
+    allowed, reason = paper.can_open_new_position("DOGEUSDT", "MultiStrategy")
+    assert allowed is False
+    assert "CIRCUIT BREAKER" in reason
+
+
 def test_paper_buy_tracks_cash_and_allocated_value(tmp_path, monkeypatch):
     import src.modules.PaperBalanceLogger as paper
 
